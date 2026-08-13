@@ -14,12 +14,16 @@ KMAKE="make -C $LINUX ARCH=riscv CROSS_COMPILE=$CROSS"
 echo "== 從目前的 .config 產 defconfig =="
 $KMAKE O="$KOUT" savedefconfig >/dev/null
 
+# CONFIG_INITRAMFS_SOURCE 是絕對路徑，兩個產物都要把它拿掉，否則 repo 裡會出現
+# 產生它的那台機器的目錄名。
+grep -v '^CONFIG_INITRAMFS_SOURCE=' "$KOUT/defconfig" > "$BUILD/defconfig.stripped"
+
 {
 	echo "# V821 (Allwinner sun300iw1p1) RV32 minimal bring-up."
 	echo "# 從已驗證開機的 .config 用 \`make savedefconfig\` 產生。"
 	echo "# CONFIG_INITRAMFS_SOURCE 刻意不寫在這裡：它是絕對路徑，由 Makefile 在 build 時"
 	echo "# 用 scripts/config 注入 \$(BUILD)/initramfs.list。"
-	grep -v '^CONFIG_INITRAMFS_SOURCE=' "$KOUT/defconfig"
+	cat "$BUILD/defconfig.stripped"
 } > "$TOP/v821_rv32_defconfig"
 echo "   寫入 v821_rv32_defconfig（$(grep -c '' "$TOP/v821_rv32_defconfig") 行）"
 
@@ -38,9 +42,9 @@ $KMAKE O="$BUILD/kbase" savedefconfig >/dev/null
 # 重新產生：make config-diff
 #
 EOF
-	diff -u "$BUILD/kbase/defconfig" "$KOUT/defconfig" \
-	  | sed -e "s|$BUILD/kbase/defconfig|a/rv32_defconfig|" \
-	        -e "s|$KOUT/defconfig|b/v821_rv32_defconfig|" || true
+	# --label 是為了不要把檔案路徑與 mtime 寫進去，否則每次重產都會有假的差異
+	diff -u --label a/rv32_defconfig --label b/v821_rv32_defconfig \
+	     "$BUILD/kbase/defconfig" "$BUILD/defconfig.stripped" || true
 } > "$TOP/config-diff.txt"
 echo "   寫入 config-diff.txt（$(grep -c '' "$TOP/config-diff.txt") 行）"
 

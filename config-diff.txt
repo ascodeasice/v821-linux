@@ -1,19 +1,13 @@
 # V821 RV32 kernel config：與上游 rv32_defconfig 的差異
 #
-# 兩邊都是 `make savedefconfig` 的輸出，也就是「相對於 Kconfig 預設值」的最小表述，
-# 所以這份 diff 就是我們真正做的決定，沒有連鎖產生的雜訊。
-# （直接對 .config 跑 scripts/diffconfig 會得到 4101 行，其中 3999 行是關掉
-#  NET/IIO/DRM 等上層開關之後的連鎖移除，不具閱讀價值。）
+# 兩邊都是 `make savedefconfig` 的輸出，相對於 Kconfig 預設值，所以這份 diff
+# 就是我們真正做的決定，沒有連鎖產生的雜訊。
 #
-# 重新產生：
-#   make config-diff
-# 等價於：
-#   make -C $LINUX O=<base> ARCH=riscv rv32_defconfig && make -C $LINUX O=<base> savedefconfig
-#   diff -u <base>/defconfig v821_rv32_defconfig
+# 重新產生：make config-diff
 #
---- a/rv32_defconfig	2026-08-13 23:35:52.627120629 +0800
-+++ b/v821_rv32_defconfig	2026-08-13 23:34:19.558997717 +0800
-@@ -1,303 +1,108 @@
+--- a/rv32_defconfig
++++ b/v821_rv32_defconfig
+@@ -1,303 +1,107 @@
  CONFIG_SYSVIPC=y
 -CONFIG_POSIX_MQUEUE=y
  CONFIG_NO_HZ_IDLE=y
@@ -37,7 +31,6 @@
  CONFIG_USER_NS=y
 -CONFIG_CHECKPOINT_RESTORE=y
  CONFIG_BLK_DEV_INITRD=y
-+CONFIG_INITRAMFS_SOURCE="/home/leo/code/linux-final-project/mainline/initramfs.list"
 +# CONFIG_PERF_EVENTS is not set
  CONFIG_PROFILING=y
 -CONFIG_ARCH_ANDES=y
