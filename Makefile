@@ -32,6 +32,15 @@ endif
 NPROC ?= $(shell nproc 2>/dev/null || echo 4)
 KMAKE := $(MAKE) -C $(LINUX) O=$(KOUT) ARCH=riscv CROSS_COMPILE=$(CROSS)
 
+# 位元組可重現：兩個人在不同機器、不同目錄下編，要得到同一顆 fw_payload.bin。
+# 不設的話有兩個變動來源——kernel banner 的建置時間，以及 initramfs cpio 標頭裡
+# 的檔案 mtime（git checkout 出來的時間各人不同）。這個變數兩處都管：
+# banner 直接用它，cpio 是 usr/Makefile:67 把它當 gen_initramfs.sh 的 -d 傳進去。
+# 要看真實建置時間就 make KBUILD_BUILD_TIMESTAMP="$(date)"。
+export KBUILD_BUILD_TIMESTAMP ?= 2026-08-13 00:00:00 UTC
+export KBUILD_BUILD_USER      ?= v821
+export KBUILD_BUILD_HOST      ?= v821-linux
+
 DTS   := $(TOP)/v821-min.dts
 DTB   := $(BUILD)/v821-min.dtb
 IRFS  := $(BUILD)/initramfs.list
