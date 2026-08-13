@@ -40,6 +40,9 @@ KMAKE := $(MAKE) -C $(LINUX) O=$(KOUT) ARCH=riscv CROSS_COMPILE=$(CROSS)
 export KBUILD_BUILD_TIMESTAMP ?= 2026-08-13 00:00:00 UTC
 export KBUILD_BUILD_USER      ?= v821
 export KBUILD_BUILD_HOST      ?= v821-linux
+# banner 的 #N 來自 objtree 的 .version，每 link 一次就加一，所以同一份原始碼在
+# 「編過幾次的樹」與「剛 clone 的樹」會得到不同的數字（init/Makefile:32）。
+export KBUILD_BUILD_VERSION   ?= 1
 
 DTS   := $(TOP)/v821-min.dts
 DTB   := $(BUILD)/v821-min.dtb
