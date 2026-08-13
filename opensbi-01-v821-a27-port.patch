@@ -1,0 +1,379 @@
+diff --git a/firmware/fw_base.S b/firmware/fw_base.S
+index 5d6540d..9fbf1c9 100644
+--- a/firmware/fw_base.S
++++ b/firmware/fw_base.S
+@@ -32,13 +32,12 @@
+ .endm
+ 
+ .macro CLEAR_MDT tmp
+-#if __riscv_xlen == 32
+-	li 	\tmp, MSTATUSH_MDT
+-	csrc	CSR_MSTATUSH, \tmp
+-#else
+-	li 	\tmp, MSTATUS_MDT
+-	csrc	CSR_MSTATUS, \tmp
+-#endif
++	/* V821/Andes A27: MDT lives in mstatush (RV32, CSR 0x310) and belongs to the
++	 * Smdbltrp double-trap extension, which this core does not implement -- it is
++	 * a Priv v1.11-era hart (our port also skips the v1.12 MENVCFG probe). Touching
++	 * mstatush here faults UNCATCHABLY, and fw_base.S:120 runs before mtvec and
++	 * before any C code, so the board goes completely silent right after the A27
++	 * stub prints #YWV. No double-trap support => nothing to clear. */
+ .endm
+ 
+ 	.section .entry, "ax", %progbits
+diff --git a/lib/sbi/riscv_asm.c b/lib/sbi/riscv_asm.c
+index 3e44320..b935288 100644
+--- a/lib/sbi/riscv_asm.c
++++ b/lib/sbi/riscv_asm.c
+@@ -19,11 +19,19 @@ int misa_extension_imp(char ext)
+ 	unsigned long misa = csr_read(CSR_MISA);
+ 
+ 	if (misa) {
++		int have;
+ 		if ('A' <= ext && ext <= 'Z')
+-			return misa & (1 << (ext - 'A'));
+-		if ('a' <= ext && ext <= 'z')
+-			return misa & (1 << (ext - 'a'));
+-		return 0;
++			have = !!(misa & (1 << (ext - 'A')));
++		else if ('a' <= ext && ext <= 'z')
++			have = !!(misa & (1 << (ext - 'a')));
++		else
++			return 0;
++		/* V821/Andes A27: misa does not advertise S although the core
++		 * has S-mode (sv32 MMU, runs Linux). Force S so OpenSBI treats
++		 * this hart as S-capable (coldboot lottery + S-mode delegation). */
++		if (ext == 'S' || ext == 's')
++			have = 1;
++		return have;
+ 	}
+ 
+ 	return sbi_platform_misa_extension(sbi_platform_thishart_ptr(), ext);
+diff --git a/lib/sbi/sbi_hart.c b/lib/sbi/sbi_hart.c
+index 0f690f5..5fdb596 100644
+--- a/lib/sbi/sbi_hart.c
++++ b/lib/sbi/sbi_hart.c
+@@ -47,10 +47,15 @@ static void mstatus_init(struct sbi_scratch *scratch)
+ 
+ 	csr_write(CSR_MSTATUS, mstatus_val);
+ 
++	/* V821/Andes A27: csr_write(CSR_SCOUNTEREN) faults UNCATCHABLY in raw-FES
++	 * state (same A27 quirk as MENVCFG / the ext probes in hart_detect_features).
++	 * force-S (riscv_asm.c) makes misa_extension('S') true, so this branch would
++	 * be taken and would reset the core. SCOUNTEREN only gates U-mode counter
++	 * reads; the kernel sets it itself from S-mode if it needs it. */
+ 	/* Disable user mode usage of all perf counters except TM */
+-	if (misa_extension('S') &&
++	/* if (misa_extension('S') &&
+ 	    sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10)
+-		csr_write(CSR_SCOUNTEREN, 0x02);
++		csr_write(CSR_SCOUNTEREN, 0x02); */
+ 
+ 	/**
+ 	 * OpenSBI doesn't use any PMU counters in M-mode.
+@@ -86,7 +91,10 @@ static void mstatus_init(struct sbi_scratch *scratch)
+ 	if (misa_extension('H'))
+ 		csr_write(CSR_HSTATUS, 0);
+ 
+-	if (sbi_hart_has_extension(scratch, SBI_HART_EXT_SMSTATEEN)) {
++	/* V821/Andes A27: csr_read(CSR_MSTATEEN0) faults UNCATCHABLY in raw-FES state
++	 * (same A27 quirk as scounteren / MENVCFG). The kernel never needs M-mode
++	 * mstateen, and force-S doesn't require it -- force-skip the whole block. */
++	if (0 && sbi_hart_has_extension(scratch, SBI_HART_EXT_SMSTATEEN)) {
+ 		mstateen_val = 0;
+ 		mstateen_val |= SMSTATEEN_STATEN;
+ 		mstateen_val |= SMSTATEEN0_CONTEXT;
+@@ -134,7 +142,11 @@ static void mstatus_init(struct sbi_scratch *scratch)
+ 		}
+ 	}
+ 
+-	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12) {
++	/* V821/Andes A27: csr_read(CSR_MENVCFG) faults UNCATCHABLY in raw-FES (same
++	 * A27 quirk as scounteren / MSTATEEN0). The kernel sets its own envcfg and the
++	 * A27 has none of the extensions this block would enable. Force-skip it; this
++	 * also covers the MSECCFG (Zkr seed) writes at the tail of the block. */
++	if (0 && sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12) {
+ 		menvcfg_val = csr_read64(CSR_MENVCFG);
+ 
+ 		/* Disable HW A/D updating by default */
+@@ -185,9 +197,13 @@ static void mstatus_init(struct sbi_scratch *scratch)
+ 	/* Disable all interrupts */
+ 	csr_write(CSR_MIE, 0);
+ 
++	/* V821/Andes A27: csr_write(CSR_SATP) faults UNCATCHABLY from M-mode in
++	 * raw-FES (misa doesn't advertise S, so an M-mode write to an S CSR traps).
++	 * force-S takes this branch. SATP is 0 at reset anyway, and the kernel sets it
++	 * itself from S-mode -- where it works, the A27 runs Linux with the sv32 MMU. */
+ 	/* Disable S-mode paging */
+-	if (misa_extension('S'))
+-		csr_write(CSR_SATP, 0);
++	/* if (misa_extension('S'))
++		csr_write(CSR_SATP, 0); */
+ }
+ 
+ static int fp_init(struct sbi_scratch *scratch)
+@@ -661,9 +677,13 @@ __pmp_skip:
+ 	/* Detect if hart supports Priv v1.11 */
+ 	__check_priv(CSR_MCOUNTINHIBIT,
+ 		     SBI_HART_PRIV_VER_1_10, SBI_HART_PRIV_VER_1_11);
++	/* V821/Andes A27: reading CSR_MENVCFG faults FATALLY and is NOT caught by the
++	 * expected-trap probe (unlike the MCOUNTEREN/MCOUNTINHIBIT probes just above)
++	 * -> OpenSBI dies here. Skipping it leaves priv_version at 1.11, which in turn
++	 * auto-skips every `priv_version >= 1.12` ext probe below. */
+ 	/* Detect if hart supports Priv v1.12 */
+-	__check_priv(CSR_MENVCFG,
+-		     SBI_HART_PRIV_VER_1_11, SBI_HART_PRIV_VER_1_12);
++	/* __check_priv(CSR_MENVCFG,
++		     SBI_HART_PRIV_VER_1_11, SBI_HART_PRIV_VER_1_12); */
+ 
+ #undef __check_priv_csr
+ 
+@@ -675,28 +695,17 @@ __pmp_skip:
+ 						    __ext, true);	\
+ 	}
+ 
+-	/* Counter overflow/filtering is not useful without mcounter/inhibit */
+-	/* Detect if hart supports sscofpmf */
+-	__check_ext_csr(SBI_HART_PRIV_VER_1_11,
+-			CSR_SCOUNTOVF, SBI_HART_EXT_SSCOFPMF);
+-	/* Detect if hart has AIA local interrupt CSRs */
+-	__check_ext_csr(SBI_HART_PRIV_VER_UNKNOWN,
+-			CSR_MTOPI, SBI_HART_EXT_SMAIA);
+-	/* Detect if hart supports stimecmp CSR(Sstc extension) */
+-	__check_ext_csr(SBI_HART_PRIV_VER_1_12,
+-			CSR_STIMECMP, SBI_HART_EXT_SSTC);
+-	/* Detect if hart supports mstateen CSRs */
+-	__check_ext_csr(SBI_HART_PRIV_VER_1_12,
+-			CSR_MSTATEEN0, SBI_HART_EXT_SMSTATEEN);
+-	/* Detect if hart supports sstateen CSRs */
+-	__check_ext_csr(SBI_HART_PRIV_VER_1_12,
+-			CSR_SSTATEEN0, SBI_HART_EXT_SSSTATEEN);
+-	/* Detect if hart supports smcntrpmf */
+-	__check_ext_csr(SBI_HART_PRIV_VER_1_12,
+-			CSR_MCYCLECFG, SBI_HART_EXT_SMCNTRPMF);
+-	/* Detect if hart support sdtrig (debug triggers) */
+-	__check_ext_csr(SBI_HART_PRIV_VER_UNKNOWN,
+-			CSR_TSELECT, SBI_HART_EXT_SDTRIG);
++	/* V821/Andes A27: csr_read_allowed() faults UNCATCHABLY (resets the core, like
++	 * MENVCFG above) on optional CSRs the core lacks -- the A27's behaviour on these
++	 * is not a catchable trap, so DON'T probe them at all. Every extension below is
++	 * optional and OpenSBI boots fine without it. Zicntr is unaffected: it is
++	 * detected further down via __check_csr_existence(CSR_TIME, ...), which the core
++	 * does implement, and the kernel clocksource needs mcounteren.TM.
++	 *
++	 * Skipped: sscofpmf / AIA (MTOPI) / sstc (STIMECMP) / smstateen (MSTATEEN0) /
++	 * ssstateen (SSTATEEN0) / smcntrpmf (MCYCLECFG) / sdtrig (TSELECT).
++	 * (void) keeps the macro referenced so it never goes stale. */
++	(void)0;
+ 
+ #undef __check_ext_csr
+ 
+@@ -722,6 +731,14 @@ __pmp_skip:
+ 		__sbi_hart_update_extension(hfeatures,
+ 					SBI_HART_EXT_ZIHPM, true);
+ 
++	/* V821/A27 has a CUSTOM Andes PMU (dts: XAndesPMU), not the standard one. The
++	 * MHPMEVENT3+ CSRs that mstatus_init would program are NOT implemented ->
++	 * writing them faults uncatchably. The MHPMCOUNTER probes above don't fault, so
++	 * mhpm_mask got set -- but it is the EVENT CSRs that are custom. Clear the mask
++	 * so OpenSBI sees no standard programmable counters; the kernel's andes-pmu
++	 * driver owns the real PMU. */
++	hfeatures->mhpm_mask = 0;
++
+ 	/* Mark hart feature detection done */
+ 	hfeatures->detected = true;
+ 
+@@ -755,6 +772,15 @@ int sbi_hart_init(struct sbi_scratch *scratch, bool cold_boot)
+ {
+ 	int rc;
+ 
++	/* V821/Andes A27: WRITE misa.S to functionally enable S-mode EARLY -- before
++	 * delegate_traps and before the mret into the kernel. The bit reads back 0, but
++	 * the write enables S-mode internally, which is required for (a) MSTATUS.MPP to
++	 * hold PRV_S (mret into the kernel) and (b) medeleg/mideleg to be WRITABLE (else
++	 * delegation stays 0 and the kernel's S-mode exceptions trap to M-mode).
++	 * NOTE: use a FULL csrw (read-OR-write), not csrs -- the vendor OpenSBI does
++	 * `csrw misa,t0`, and the A27's misa appears to honour only full writes. */
++	csr_write(CSR_MISA, csr_read(CSR_MISA) | (1UL << ('S' - 'A')));
++
+ 	/*
+ 	 * Clear mip CSR before proceeding with init to avoid any spurious
+ 	 * external interrupts in S-mode.
+@@ -844,10 +870,16 @@ sbi_hart_switch_mode(unsigned long arg0, unsigned long arg1,
+ 			csr_write(CSR_VSIE, 0);
+ 			csr_write(CSR_VSATP, 0);
+ 		} else {
+-			csr_write(CSR_STVEC, next_addr);
++			/* V821/Andes A27: these four S-mode CSR writes from M-mode fault
++			 * uncatchably (misa.S reads 0 -> M-mode S-CSR access traps). The
++			 * kernel sets ALL of them itself from S-mode very early in head.S:
++			 * stvec before any trap, satp for sv32, sie/sscratch in trap init.
++			 * Global S-interrupts are already off via mstatus.MPIE=0 above and
++			 * SATP is 0 at reset, so skipping all four is safe. */
++			/* csr_write(CSR_STVEC, next_addr);
+ 			csr_write(CSR_SSCRATCH, 0);
+ 			csr_write(CSR_SIE, 0);
+-			csr_write(CSR_SATP, 0);
++			csr_write(CSR_SATP, 0); */
+ 		}
+ 	} else if (next_mode == PRV_U) {
+ 		if (misa_extension('N')) {
+diff --git a/lib/sbi/sbi_hart_pmp.c b/lib/sbi/sbi_hart_pmp.c
+index 02a3b3c..22e618a 100644
+--- a/lib/sbi/sbi_hart_pmp.c
++++ b/lib/sbi/sbi_hart_pmp.c
+@@ -74,7 +74,11 @@ void sbi_hart_pmp_fence(void)
+ 	 * It is advisable to flush the caching structures under such
+ 	 * conditions.
+ 	 */
+-	if (misa_extension('S')) {
++	/* V821/Andes A27: sfence.vma is a SUPERVISOR instruction; executing it from
++	 * M-mode faults uncatchably (misa.S=0, same class as the S-mode CSR writes).
++	 * The TLB is empty at cold boot so this flush is a no-op, and the kernel issues
++	 * its own sfence.vma when it enables paging. */
++	if (0 && misa_extension('S')) {
+ 		__sbi_sfence_vma_all();
+ 
+ 		/*
+diff --git a/lib/sbi/sbi_init.c b/lib/sbi/sbi_init.c
+index b248e73..a47d369 100644
+--- a/lib/sbi/sbi_init.c
++++ b/lib/sbi/sbi_init.c
+@@ -223,6 +223,32 @@ unsigned long __stack_chk_guard = 0x95B5FF5A;
+ static unsigned long entry_count_offset;
+ static unsigned long init_count_offset;
+ 
++/* V821: a SIMPLE direct-UART0 console for OpenSBI. The stock dw-apb fdt-serial
++ * probe hangs on this SoC, but this direct putc/getc works. Registering it gives
++ * OpenSBI its banner AND backs the SBI console extension. */
++static void v821_putc(char ch)
++{
++	volatile unsigned int *u = (volatile unsigned int *)0x42500000UL;
++	while (!(u[5] & 0x20))
++		;
++	u[0] = (unsigned char)ch;
++}
++
++static int v821_getc(void)
++{
++	volatile unsigned int *u = (volatile unsigned int *)0x42500000UL;
++
++	if (u[5] & 0x01)
++		return (int)(u[0] & 0xff);
++	return -1;
++}
++
++static const struct sbi_console_device v821_console = {
++	.name = "v821-uart0",
++	.console_putc = v821_putc,
++	.console_getc = v821_getc,
++};
++
+ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
+ {
+ 	int rc;
+@@ -271,6 +297,10 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
+ 	if (rc)
+ 		sbi_hart_hang();
+ 
++	/* V821: register the direct-UART0 console (see above) so the banner and the
++	 * SBI console extension work without the dw-apb fdt-serial probe. */
++	sbi_console_set_device(&v821_console);
++
+ 	/*
+ 	 * Initialize stack guard via Zkr entropy source if Zkr is
+ 	 * implemented according to device tree. Writing new seed value
+diff --git a/lib/utils/serial/uart8250.c b/lib/utils/serial/uart8250.c
+index d65f127..869e9d7 100644
+--- a/lib/utils/serial/uart8250.c
++++ b/lib/utils/serial/uart8250.c
+@@ -98,6 +98,30 @@ static int uart8250_getc(void)
+ 	return uart8250_device_getc(&uart8250_dev);
+ }
+ 
++/*
++ * V821: UART0 is a Synopsys dw-apb-uart. An LCR write while the UART is "busy"
++ * (mid-transfer) is silently DROPPED and latches a busy-detect; the dw-apb USR
++ * (status register) must be read to clear it. The generic 8250 init doesn't do
++ * this, so on a dw-apb the LCR writes in uart8250_init wedge the port. Write LCR
++ * busy-safe: if the value didn't latch, clear busy via USR and retry.
++ *
++ * Linux does the same thing in dw8250_check_lcr()
++ * (drivers/tty/serial/8250/8250_dw.c).
++ */
++#define UART_USR_OFFSET		0x1f	/* dw-apb UART Status Register */
++static void uart8250_set_lcr(struct uart8250_device *dev, u32 val)
++{
++	int i;
++
++	for (i = 0; i < 10000; i++) {
++		set_reg(dev, UART_LCR_OFFSET, val);
++		if (get_reg(dev, UART_LCR_OFFSET) == val)
++			return;
++		(void)get_reg(dev, UART_USR_OFFSET);	/* clear busy-detect */
++		(void)get_reg(dev, UART_RBR_OFFSET);	/* drain pending rx */
++	}
++}
++
+ static struct sbi_console_device uart8250_console = {
+ 	.name = "uart8250",
+ 	.console_putc = uart8250_putc,
+@@ -124,8 +148,8 @@ void uart8250_device_init(struct uart8250_device *dev, unsigned long base,
+ 	/* Disable all interrupts */
+ 	set_reg(dev, UART_IER_OFFSET, (caps & UART_CAP_UUE) ?
+ 				 UART_IER_UUE : 0x00);
+-	/* Enable DLAB */
+-	set_reg(dev, UART_LCR_OFFSET, 0x80);
++	/* Enable DLAB (busy-safe for dw-apb) */
++	uart8250_set_lcr(dev, 0x80);
+ 
+ 	if (bdiv) {
+ 		/* Set divisor low byte */
+@@ -134,8 +158,8 @@ void uart8250_device_init(struct uart8250_device *dev, unsigned long base,
+ 		set_reg(dev, UART_DLM_OFFSET, (bdiv >> 8) & 0xff);
+ 	}
+ 
+-	/* 8 bits, no parity, one stop bit */
+-	set_reg(dev, UART_LCR_OFFSET, 0x03);
++	/* 8 bits, no parity, one stop bit (busy-safe for dw-apb) */
++	uart8250_set_lcr(dev, 0x03);
+ 	/* Enable FIFO */
+ 	set_reg(dev, UART_FCR_OFFSET, 0x01);
+ 	/* No modem control DTR RTS */
+diff --git a/platform/generic/platform.c b/platform/generic/platform.c
+index 01fa03e..02eca20 100644
+--- a/platform/generic/platform.c
++++ b/platform/generic/platform.c
+@@ -153,7 +153,6 @@ unsigned long fw_platform_init(unsigned long arg0, unsigned long arg1,
+ 	root_offset = fdt_path_offset(fdt, "/");
+ 	if (root_offset < 0)
+ 		goto fail;
+-
+ 	fdt_driver_init_by_offset(fdt, root_offset, platform_override_modules);
+ 
+ 	model = fdt_getprop(fdt, root_offset, "model", &len);
+@@ -221,12 +220,18 @@ int generic_early_init(bool cold_boot)
+ 	int rc;
+ 
+ 	if (cold_boot) {
+-		if (semihosting_enabled())
++		/* V821/Andes A27: the dw-apb fdt-serial probe HANGS on this SoC. In the
++		 * v1.4 port this was bypassed by replacing sbi_console_init(); master
++		 * reaches the same probe from here instead, and this call sits BEFORE
++		 * sbi_boot_print_banner() -- so hanging here means the board goes silent
++		 * right after the A27 stub prints #YWV, with no OpenSBI output at all.
++		 * init_coldboot() already registered the direct-UART0 v821 console, so
++		 * skip the probe entirely. */
++		if (semihosting_enabled()) {
+ 			rc = semihosting_init();
+-		else
+-			rc = fdt_serial_init(fdt);
+-		if (rc)
+-			return rc;
++			if (rc)
++				return rc;
++		}
+ 
+ 		fdt_driver_init_all(fdt, fdt_early_drivers);
+ 	}

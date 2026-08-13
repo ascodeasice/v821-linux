@@ -1,0 +1,17 @@
+# V821 rv32 最小 initramfs（gen_init_cpio 的來源清單）。
+# Makefile 會把 @TOP@ 換成 repo 根目錄，產生 build/initramfs.list，
+# 再用 scripts/config 把 CONFIG_INITRAMFS_SOURCE 指過去。
+#
+# 這裡的路徑必須是絕對路徑：kbuild 跑 gen_init_cpio 時的 CWD 是 O= 的 objtree，
+# 相對路徑會被解析到 build 目錄底下而不是 repo。
+#
+# busybox 是 rv32imac / ilp32 soft-float 的 static binary，跟 dts 宣告的
+# riscv,isa-extensions 一致。換成 hard-float 的版本會在 __sigsetjmp 的 fsd 上 SIGILL。
+dir  /dev 0755 0 0
+nod  /dev/console 0600 0 0 c 5 1
+dir  /proc 0755 0 0
+dir  /sys 0755 0 0
+dir  /bin 0755 0 0
+file /bin/busybox @TOP@/prebuilt/busybox 0755 0 0
+file /bin/cycfreq @TOP@/prebuilt/cycfreq 0755 0 0
+file /init      @TOP@/init.sh          0755 0 0

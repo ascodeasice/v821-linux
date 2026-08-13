@@ -1,0 +1,65 @@
+V821 bring-up: early UART0 progress markers in head.S.
+
+MMU 還沒開的時候沒有 console，kernel 死在 _start_kernel 哪一段完全看不出來。
+DBGCH 直接對 UART0（位址 0x42500000，DW-APB，reg-shift 2，所以 LSR 在 +0x14）打單一字元，
+只用掉 t0/t1。marker 順序 A 3 4 7 8 對應：進入 S-mode / 清 sie+sip /
+寫完 scounteren / setup_vm 之前 / 開 MMU 之前。
+
+這是除錯用的，不是 port 的必要條件；不想要就別套這支。
+
+diff --git a/arch/riscv/kernel/head.S b/arch/riscv/kernel/head.S
+index 9c99c5ad6fe8..9510a0a8aa14 100644
+--- a/arch/riscv/kernel/head.S
++++ b/arch/riscv/kernel/head.S
+@@ -18,6 +18,18 @@
+ #include <asm/usercfi.h>
+ #include "efi-header.S"
+ 
++/* V821 bring-up: direct-UART0 (0x42500000) marker to trace early head.S progress
++ * while the MMU is still off (physical addresses valid). Clobbers t0,t1 only. */
++.macro DBGCH ch
++	li	t0, 0x42500000
++.L_dbgwait\@:
++	lw	t1, 20(t0)		/* LSR @ reg index 5, reg-shift 2 => +0x14 */
++	andi	t1, t1, 0x20		/* THRE */
++	beqz	t1, .L_dbgwait\@
++	li	t1, \ch
++	sw	t1, 0(t0)		/* THR */
++.endm
++
+ __HEAD
+ SYM_CODE_START(_start)
+ 	/*
+@@ -215,9 +227,11 @@ secondary_start_sbi:
+ SYM_CODE_END(_start)
+ 
+ SYM_CODE_START(_start_kernel)
++	DBGCH 'A'			/* V821: reached kernel _start_kernel in S-mode */
+ 	/* Mask all interrupts */
+ 	csrw CSR_IE, zero
+ 	csrw CSR_IP, zero
++	DBGCH '3'			/* V821: past sie/sip clear */
+ 
+ #ifdef CONFIG_RISCV_M_MODE
+ 	/* flush the instruction cache */
+@@ -250,6 +264,7 @@ SYM_CODE_START(_start_kernel)
+ 	/* Enable time CSR */
+ 	li t0, 0x2
+ 	csrw CSR_SCOUNTEREN, t0
++	DBGCH '4'			/* V821: past S-mode scounteren write */
+ #endif /* CONFIG_RISCV_M_MODE */
+ 
+ 	/* Load the global pointer */
+@@ -332,10 +347,12 @@ SYM_CODE_START(_start_kernel)
+ 	/* Set trap vector to spin forever to help debug */
+ 	la a3, .Lsecondary_park
+ 	csrw CSR_TVEC, a3
++	DBGCH '7'			/* V821: before setup_vm (page tables) */
+ 	call setup_vm
+ #ifdef CONFIG_MMU
+ 	la a0, early_pg_dir
+ 	XIP_FIXUP_OFFSET a0
++	DBGCH '8'			/* V821: setup_vm done; next enables the MMU */
+ 	call relocate_enable_mmu
+ #endif /* CONFIG_MMU */
+ 
