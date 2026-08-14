@@ -199,19 +199,22 @@ Supervisor mode）。
 A3478
 OpenSBI v1.8
 Boot HART Base ISA          : rv32imafdcnx
-Linux version 7.0.0-rc4-00315-ga0c83177734a-dirty
-ttyS0 at MMIO 0x42500000 (irq = N, base_baud = 12000000) is a 16550A
+Linux version 7.0.0-rc4-ga0c83177734a-dirty
+ttyS0 at MMIO 0x42500000 (irq = 12, base_baud = 12000000) is a 16550A
 ```
 
 `A3478` 是 `head.S` 的 marker（進 S-mode / 清 sie+sip / 寫完 scounteren /
 setup_vm 之前 / 開 MMU 之前），來自 `linux-02-early-uart-markers.patch`。
 banner 裡的 `ga0c83177734a` 證明跑的就是釘住的那顆 commit。
+（沒有 `-rc4-00315-` 這種 commit 數，是因為 `fetch.sh` 用淺層 fetch 抓單一 commit，
+樹裡沒有 tag，`scripts/setlocalversion` 的 `git describe` 就退回只印 `-g<sha>`。
+`-dirty` 是因為 patch 是以工作區改動的形式套上去的，沒有 commit。）
 
 ### R11 — timer 頻率正確
 
 ```
-TMR_A=3.70
-TMR_B=8.76
+TMR_A=4.10
+TMR_B=9.16
 ```
 
 兩次 `/proc/uptime` 中間夾一個 `sleep 5`，差值要接近 5.0。這驗的是 dts 的
@@ -232,19 +235,33 @@ TMR_B=8.76
 
 從放核出 reset 到這裡約 12 秒。
 
-### R13 — 輸入 round-trip（要人在終端機前面）
+### R13 — 輸入 round-trip 與 PLIC 中斷
 
-`make boot` 結束後板子還活著，接上序列埠打字：
+`make boot` 結束後板子還活著（felcpux 只是關掉 host 端的序列埠），接上打字：
 
 ```
 / # echo hi
 hi
 / # cat /proc/interrupts
+           CPU0
+ 10:       1908 RISC-V INTC   5 Edge      riscv-timer
+ 12:        100 SiFive PLIC   3 Edge      ttyS0
 ```
 
-UART 那列的計數會隨打字上升，這是 `interrupts-extended = <&plic 3 4>` 這條路徑
-唯一決定性的證據——boot log 裡的 `irq = N` 只證明 DT 屬性被解析、PLIC domain 有
-對應到，hwirq 寫錯一樣會印出非零的 N。
+`hwirq 3` 對應 dts 的 `interrupts-extended = <&plic 3 4>`。
+
+但 boot log 裡的 `irq = N` 只證明 DT 屬性被解析、PLIC domain 有對應到——**hwirq
+寫錯一樣會印出非零的 N**。決定性的是計數要隨打字上升，那需要真的走到線上：
+
+```
+打字前 ttyS0 中斷計數: 165
+送入若干字元後:        452     （上升 287）
+```
+
+這條路徑先前是關掉的。舊紀錄裡「第一次輸入就 silent reset」是在 **vendor
+OpenSBI** 底下觀察到的，而那顆 firmware 同時也是 62 秒 deadman、fid-33 ebreak halt
+與各種抓不到的 CSR reset 的來源。換成自編的 OpenSBI master 之後這條路從來沒重測過，
+這次一併驗了：打字全程沒有 reset。
 
 ### R14 — 慢速態對照組
 

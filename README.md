@@ -163,7 +163,7 @@ make boot
 | 2 | `START_ADD 回讀：0x83f00000` | 寫入 stick 了（解 cfg reset 之前會被忽略） |
 | 3 | `#YWV` | A27 出 reset 並在跑我們的 stub |
 | 4 | `OpenSBI v1.8` banner | M-mode firmware 起來了 |
-| 5 | `A3478`、`Linux version 7.0.0-rc4-00315-ga0c83177734a` | kernel 進 S-mode |
+| 5 | `A3478`、`Linux version 7.0.0-rc4-ga0c83177734a-dirty` | kernel 進 S-mode |
 | 6 | `ttyS0 at MMIO 0x42500000` | console 拿到了 |
 | 7 | `/ #`、`>>> SHELL on A27!` | 開到 shell |
 
