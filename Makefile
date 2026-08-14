@@ -89,8 +89,11 @@ dtb: $(DTB)  ## 只重編 device tree
 # 而 -Ttext= 配 default PIE 會產生沒人套用的 R_RISCV_RELATIVE relocation；
 # build-id note 則會拿到 0x83f00000 以下的位址，objcopy 會把 note 排在 code 前面，
 # A27 出 reset 後第一件事就是執行 note header。兩種都是板子全靜音、沒有任何訊息。
+# -march 要帶 _zicsr_zifencei，理由跟下面 OpenSBI 那條一樣：stub 裡有 csrw/csrs/
+# csrr 與 fence.i，binutils 2.36 之後這些不在 base I 裡面。加了之後兩套 toolchain
+# 編出來的位元組都跟 golden 相同，所以只是換一種寫法、不是換指令。
 $(BUILD)/a27_stub.elf: $(TOP)/a27_stub.S | $(BUILD)
-	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -fno-pie -no-pie \
+	$(CROSS)gcc -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -fno-pie -no-pie \
 	    -Wl,--build-id=none -Ttext=0x83f00000 -o $@ $<
 
 $(STUB): $(BUILD)/a27_stub.elf
@@ -130,9 +133,15 @@ menuconfig: $(KOUT)/.config  ## 改 config（改完記得 make config-diff 更�
 # CC_SUPPORT_VECTOR=n：A27 沒有 V extension，編進去只是死碼。
 # （這個旗標最早是為了繞過 XuanTie binutils 2.35 組不出 vector 指令，
 #   binutils 2.38 之後已經不需要，但保留它可以讓 firmware 內容跟實機驗過的那顆一致。）
+#
+# ISA 字串要帶 _zicsr_zifencei：binutils 2.36 把 fence.i 與 CSR 指令從 base I 移到
+# Zifencei / Zicsr，而 fw_base.S:829 有 fence.i。OpenSBI 自己有偵測（Makefile:322），
+# 但只在沒有明確傳 PLATFORM_RISCV_ISA 時才會補，我們有傳所以要自己帶。
+# binutils 2.35（XuanTie 那套）也吃這個寫法，兩邊通用。
 fw: $(DTB) kernel $(STAMP)  ## 把 kernel 與 dtb 包進 OpenSBI fw_payload
 	$(MAKE) -C $(OPENSBI) PLATFORM=generic CROSS_COMPILE=$(CROSS) \
-	    PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ISA=rv32imafdc PLATFORM_RISCV_ABI=ilp32d \
+	    PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ISA=rv32imafdc_zicsr_zifencei \
+	    PLATFORM_RISCV_ABI=ilp32d \
 	    FW_TEXT_START=0x80000000 FW_PIC=y CC_SUPPORT_VECTOR=n \
 	    FW_FDT_PATH=$(DTB) FW_PAYLOAD_PATH=$(IMAGE) -j$(NPROC)
 

@@ -52,13 +52,15 @@ else
 	say "rv32imac/ilp32 編譯（kernel）" "失敗"; sed 's/^/    /' "$TMP/e1"; fail=1
 fi
 
-# 2. OpenSBI 路徑：rv32imafdc/ilp32d 的 freestanding link。這是決定性的一項
-printf '.globl _start\n_start: j _start\n' > "$TMP/s.S"
-if $CC -march=rv32imafdc -mabi=ilp32d -mcmodel=medany -nostdlib -fPIE -Wl,-pie \
+# 2. OpenSBI 路徑：rv32imafdc_zicsr_zifencei/ilp32d 的 freestanding link。
+# 探測用的原始碼一定要含 fence.i 與 csrr：binutils 2.36 把它們從 base I 移到
+# Zifencei / Zicsr，只組一個 `j _start` 是測不出來的（fw_base.S:829 有 fence.i）。
+printf '.globl _start\n_start: fence.i\n csrr t0, mhartid\n j _start\n' > "$TMP/s.S"
+if $CC -march=rv32imafdc_zicsr_zifencei -mabi=ilp32d -mcmodel=medany -nostdlib -fPIE -Wl,-pie \
        -Wl,--no-dynamic-linker -Wl,--build-id=none -o "$TMP/s.elf" "$TMP/s.S" 2>"$TMP/e2"; then
-	say "rv32imafdc/ilp32d freestanding link" "ok（OpenSBI 可以編）"
+	say "rv32imafdc_zicsr_zifencei/ilp32d link" "ok（OpenSBI 可以編）"
 else
-	say "rv32imafdc/ilp32d freestanding link" "失敗 — OpenSBI 編不起來"
+	say "rv32imafdc_zicsr_zifencei/ilp32d link" "失敗 — OpenSBI 編不起來"
 	sed 's/^/    /' "$TMP/e2"; fail=1
 fi
 
@@ -70,8 +72,8 @@ else
 fi
 
 # 4. stub 路徑：-Ttext= 的 no-PIE link
-if $CC -march=rv32imac -mabi=ilp32 -nostdlib -fno-pie -no-pie -Wl,--build-id=none \
-       -Ttext=0x83f00000 -o "$TMP/stub.elf" "$TMP/s.S" 2>"$TMP/e3"; then
+if $CC -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -fno-pie -no-pie \
+       -Wl,--build-id=none -Ttext=0x83f00000 -o "$TMP/stub.elf" "$TMP/s.S" 2>"$TMP/e3"; then
 	say "stub link（-Ttext, no-pie）" "ok"
 else
 	say "stub link（-Ttext, no-pie）" "失敗"; sed 's/^/    /' "$TMP/e3"; fail=1
