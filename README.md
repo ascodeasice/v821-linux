@@ -357,7 +357,12 @@ Tina Linux 5.4.220。
 ## 目前狀態與下一步
 
 **能動的**：FEL 載入 → 自編 OpenSBI → mainline Linux（S-mode, A27）→ 內建 initramfs
-→ 互動 busybox shell，約 12 秒。
+→ 互動 busybox shell，約 12 秒。輸入可用，UART0 走 PLIC 中斷（實機 `irq = 12`、
+hwirq 3，打字時 `/proc/interrupts` 的計數會上升）。
+
+專案早期有一條「進 shell 之後第一個輸入就 silent reset」的已知限制。那是在 **vendor
+OpenSBI** 底下觀察到的，而那顆 firmware 同時也是 62 秒 deadman 與各種抓不到的 CSR
+reset 的來源。換成自編的 OpenSBI master 之後這條路一直沒重測，這次一併驗掉了。
 
 **還沒解決的**：`SEL=0`（A27 掛 HOSC）的絕對頻率沒量到，實測慢的倍數比欄位表推算的
 多一到兩個數量級。沒有任何暫存器會報告 A27 實際跑幾 Hz，所以只能靠量測。詳見
