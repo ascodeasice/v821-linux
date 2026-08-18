@@ -13,5 +13,4 @@ dir  /proc 0755 0 0
 dir  /sys 0755 0 0
 dir  /bin 0755 0 0
 file /bin/busybox @TOP@/initramfs/prebuilt/busybox 0755 0 0
-file /bin/cycfreq @TOP@/initramfs/prebuilt/cycfreq 0755 0 0
 file /init      @TOP@/initramfs/init.sh          0755 0 0

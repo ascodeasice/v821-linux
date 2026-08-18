@@ -55,7 +55,7 @@ else
 fi
 
 # 4. prebuilt 的 ABI 要跟 dts 宣告的一致。hard-float 的 binary 會在 __sigsetjmp 的 fsd 上 SIGILL
-for b in busybox cycfreq; do
+for b in busybox; do
 	d=$(file -b "$TOP/initramfs/prebuilt/$b" 2>/dev/null || echo missing)
 	case "$d" in
 	    *"ELF 32-bit"*"RISC-V"*"soft-float"*static*) say "initramfs/prebuilt/$b 是 rv32 soft-float static" "ok" ;;

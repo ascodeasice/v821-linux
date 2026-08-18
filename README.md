@@ -21,7 +21,7 @@ A27 的喚醒序列，就是這個移植的全部。
 ├── pins.env          釘住的上游 commit
 ├── boot/             會進到板子上的東西：device tree 與 A27 entry stub
 ├── config/           kernel 與 busybox 的 config，以及與上游的 diff
-├── initramfs/        initramfs 的內容，含 prebuilt/ 的 rv32 binary
+├── initramfs/        initramfs 的內容，含 prebuilt/ 的 rv32 busybox
 ├── patches/          kernel 與 OpenSBI 的全部改動
 ├── scripts/          抓原始碼、上板前的檢查、FEL 喚醒
 └── RESULTS.md        每個宣稱對應一條可以跑的指令與預期證據行
@@ -47,8 +47,8 @@ A27 的喚醒序列，就是這個移植的全部。
 | `scripts/config-diff.sh` | 從目前的 `.config` 重產 `config/` 底下那兩份 |
 | `boot/a27_stub.S` + `boot/a27_stub.bin.golden` | A27 出 reset 後的落地點，134 bytes |
 | `config/v821_rv32_defconfig`、`config/busybox-rv32.config` | kernel 與 busybox 的 config |
-| `initramfs/init.sh`、`initramfs/initramfs.list.in`、`initramfs/cycfreq.c` | initramfs 的內容 |
-| `initramfs/prebuilt/` | rv32 的 busybox 與 cycfreq，為什麼要 prebuilt 見 `initramfs/prebuilt/README.md` |
+| `initramfs/init.sh`、`initramfs/initramfs.list.in` | initramfs 的內容 |
+| `initramfs/prebuilt/` | rv32 的 busybox，為什麼要 prebuilt 見 `initramfs/prebuilt/README.md` |
 
 ---
 
@@ -95,7 +95,7 @@ freestanding link、跑一次 OpenSBI 自己那個 LD_PIE 探測。
 
 **toolchain 的一個限制**：發行版的 `riscv64-linux-gnu-*` 沒有 rv32 的 libc，
 所以 userspace 編不出來。kernel、OpenSBI、stub 都是 freestanding，不受影響。
-busybox 與 cycfreq 因此用 prebuilt，理由與重編方式見 `initramfs/prebuilt/README.md`。
+busybox 因此用 prebuilt，理由與重編方式見 `initramfs/prebuilt/README.md`。
 
 要用 XuanTie 那套（原本實機驗過的）就 `make CROSS=/abs/path/to/riscv64-unknown-linux-gnu-`。
 

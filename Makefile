@@ -107,7 +107,7 @@ stub: $(STUB)  ## 編 A27 entry stub 並與 golden 比對
 
 # ---- initramfs ----
 
-$(IRFS): $(TOP)/initramfs/initramfs.list.in $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/prebuilt/cycfreq $(TOP)/initramfs/init.sh | $(BUILD)
+$(IRFS): $(TOP)/initramfs/initramfs.list.in $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/init.sh | $(BUILD)
 	sed 's|@TOP@|$(TOP)|g' $< > $@
 
 # ---- kernel ----
@@ -120,7 +120,7 @@ $(KOUT)/.config: $(TOP)/config/v821_rv32_defconfig $(IRFS) $(STAMP)
 	$(LINUX)/scripts/config --file $@ --set-str INITRAMFS_SOURCE $(IRFS)
 	$(KMAKE) olddefconfig
 
-kernel: $(KOUT)/.config $(IRFS) $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/prebuilt/cycfreq $(TOP)/initramfs/init.sh  ## 編 kernel Image（initramfs 內建）
+kernel: $(KOUT)/.config $(IRFS) $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/init.sh  ## 編 kernel Image（initramfs 內建）
 	$(KMAKE) -j$(NPROC) Image
 
 $(IMAGE): kernel
