@@ -1,9 +1,9 @@
-# V821 RV32 kernel config：與上游 rv32_defconfig 的差異
+# V821 RV32 kernel config: what differs from the upstream rv32_defconfig
 #
-# 兩邊都是 `make savedefconfig` 的輸出，相對於 Kconfig 預設值，所以這份 diff
-# 就是我們真正做的決定，沒有連鎖產生的雜訊。
+# Both sides are `make savedefconfig` output, expressed relative to the Kconfig
+# defaults, so this diff is the decisions we actually made, with no cascaded noise.
 #
-# 重新產生：make config-diff
+# Regenerate: make config-diff
 #
 --- a/rv32_defconfig
 +++ b/v821_rv32_defconfig

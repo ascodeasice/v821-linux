@@ -1,53 +1,56 @@
 #!/bin/sh
-# 重產 config/v821_rv32_defconfig 與 config/config-diff.txt。
+# Regenerate config/v821_rv32_defconfig and config/config-diff.txt.
 #
-# 兩份都是 `make savedefconfig` 的輸出，也就是相對於 Kconfig 預設值的最小表述，
-# 所以 diff 出來就是我們真正做的決定。直接對 .config 跑 scripts/diffconfig 會得到
-# 四千多行，其中絕大多數是關掉 NET / IIO / DRM 等上層開關之後的連鎖移除。
+# Both are `make savedefconfig` output, i.e. the minimal expression relative to the
+# Kconfig defaults, so the diff between them is exactly the decisions we made.
+# Running scripts/diffconfig on the raw .config instead gives 4000+ lines, almost all
+# of it cascaded removals from switching off NET / IIO / DRM and friends.
 #
-# 用法：config-diff.sh <LINUX> <KOUT> <BUILD> <CROSS> <TOP>
+# Usage: config-diff.sh <LINUX> <KOUT> <BUILD> <CROSS> <TOP>
 set -e
 
 LINUX=$1; KOUT=$2; BUILD=$3; CROSS=$4; TOP=$5
 KMAKE="make -C $LINUX ARCH=riscv CROSS_COMPILE=$CROSS"
 
-echo "== 從目前的 .config 產 defconfig =="
+echo "== generating a defconfig from the current .config =="
 $KMAKE O="$KOUT" savedefconfig >/dev/null
 
-# CONFIG_INITRAMFS_SOURCE 是絕對路徑，兩個產物都要把它拿掉，否則 repo 裡會出現
-# 產生它的那台機器的目錄名。
+# CONFIG_INITRAMFS_SOURCE is an absolute path and has to be stripped from both
+# artifacts, otherwise the repo records the directory name of whichever machine
+# produced them.
 grep -v '^CONFIG_INITRAMFS_SOURCE=' "$KOUT/defconfig" > "$BUILD/defconfig.stripped"
 
 {
 	echo "# V821 (Allwinner sun300iw1p1) RV32 minimal bring-up."
-	echo "# 從已驗證開機的 .config 用 \`make savedefconfig\` 產生。"
-	echo "# CONFIG_INITRAMFS_SOURCE 刻意不寫在這裡：它是絕對路徑，由 Makefile 在 build 時"
-	echo "# 用 scripts/config 注入 \$(BUILD)/initramfs.list。"
+	echo "# Generated from the .config verified on hardware with \`make savedefconfig\`."
+	echo "# CONFIG_INITRAMFS_SOURCE is deliberately absent: it is an absolute path, and"
+	echo "# the Makefile injects \$(BUILD)/initramfs.list at build time via scripts/config."
 	cat "$BUILD/defconfig.stripped"
 } > "$TOP/config/v821_rv32_defconfig"
-echo "   寫入 config/v821_rv32_defconfig（$(grep -c '' "$TOP/config/v821_rv32_defconfig") 行）"
+echo "   wrote config/v821_rv32_defconfig ($(grep -c '' "$TOP/config/v821_rv32_defconfig") lines)"
 
-echo "== 產上游 rv32_defconfig 的 baseline =="
+echo "== generating the upstream rv32_defconfig baseline =="
 rm -rf "$BUILD/kbase"
 $KMAKE O="$BUILD/kbase" rv32_defconfig >/dev/null
 $KMAKE O="$BUILD/kbase" savedefconfig >/dev/null
 
 {
 	cat <<'EOF'
-# V821 RV32 kernel config：與上游 rv32_defconfig 的差異
+# V821 RV32 kernel config: what differs from the upstream rv32_defconfig
 #
-# 兩邊都是 `make savedefconfig` 的輸出，相對於 Kconfig 預設值，所以這份 diff
-# 就是我們真正做的決定，沒有連鎖產生的雜訊。
+# Both sides are `make savedefconfig` output, expressed relative to the Kconfig
+# defaults, so this diff is the decisions we actually made, with no cascaded noise.
 #
-# 重新產生：make config-diff
+# Regenerate: make config-diff
 #
 EOF
-	# --label 是為了不要把檔案路徑與 mtime 寫進去，否則每次重產都會有假的差異
+	# --label keeps file paths and mtimes out of the output; otherwise every
+	# regeneration shows a fake difference.
 	diff -u --label a/rv32_defconfig --label b/v821_rv32_defconfig \
 	     "$BUILD/kbase/defconfig" "$BUILD/defconfig.stripped" || true
 } > "$TOP/config/config-diff.txt"
-echo "   寫入 config/config-diff.txt（$(grep -c '' "$TOP/config/config-diff.txt") 行）"
+echo "   wrote config/config-diff.txt ($(grep -c '' "$TOP/config/config-diff.txt") lines)"
 
 echo
-echo "我們主動關掉的上層開關："
+echo "Top-level switches we turned off:"
 grep '^+# CONFIG_' "$TOP/config/config-diff.txt" | sed 's/^+/  /'

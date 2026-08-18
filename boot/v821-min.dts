@@ -8,11 +8,14 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* Console 直驅 UART0 硬體（ttyS0），跟原廠一樣。
-		 * earlycon 用 uart8250,mmio32 且不帶 baud，所以它沿用 bootloader
-		 * 已經設好的 divisor -> 不管 clock-frequency 寫多少都不會亂碼。
-		 * 不用 hvc0/SBI console：兩個 master 搶同一顆 UART 會把 console 寫壞
-		 * （這才是早期 [0.387] 亂碼的真因，不是 UART0 不能用）。 */
+		/* The console drives the UART0 hardware directly (ttyS0), same as the
+		 * factory kernel.
+		 * earlycon uses uart8250,mmio32 with no baud, so it inherits the divisor
+		 * the bootloader already programmed -> whatever clock-frequency says, no
+		 * garbage on screen.
+		 * Not hvc0/SBI console: two masters fighting over one UART corrupts the
+		 * console, which is the real cause of the early [0.387] garbage -- not
+		 * UART0 being unusable. */
 		bootargs = "earlycon=uart8250,mmio32,0x42500000 console=ttyS0,115200 loglevel=8";
 	};
 
@@ -29,29 +32,34 @@
 			device_type = "cpu";
 			reg = <0>;
 			compatible = "andestech,a27", "riscv";
-			/* ISA 只用新介面（riscv,isa-base + riscv,isa-extensions），
-			 * 刻意不放 deprecated 的 riscv,isa。
+			/* The ISA uses the new interface only (riscv,isa-base plus
+			 * riscv,isa-extensions); the deprecated riscv,isa is left out on
+			 * purpose.
 			 *
-			 * 為什麼可以不放：kernel 的 riscv_early_of_processor_hartid()
-			 * 先讀 isa-base，只有在它不存在時才 goto old_interface
-			 * （c98f136aedbd）。所以新介面自己就夠。
+			 * Why that is safe: the kernel's riscv_early_of_processor_hartid()
+			 * reads isa-base first and only falls through to old_interface when
+			 * it is absent (c98f136aedbd). The new interface alone is enough.
 			 *
-			 * 代價（重要）：OpenSBI v1.4 的 fdt_parse_isa_all_harts() 只認得
-			 * legacy 屬性（fdt_helper.c:437），拿這份 dts 配 v1.4 會 SBI_ENOENT
-			 * -> generic_extensions_init() 失敗 -> 在 console 起來之前就靜默卡死在
-			 * sbi_hart_hang()。要退回 v1.4 就得把 riscv,isa = "rv32imac"; 加回來。
-			 * 上游 master（本 repo 的預設）認得新介面，沒這個問題。
+			 * The cost (important): OpenSBI v1.4's fdt_parse_isa_all_harts()
+			 * only understands the legacy property (fdt_helper.c:437), so this
+			 * dts on v1.4 gives SBI_ENOENT -> generic_extensions_init() fails ->
+			 * a silent hang in sbi_hart_hang() before the console is even up. To
+			 * go back to v1.4, add riscv,isa = "rv32imac"; again. Upstream master
+			 * (this repo's default) understands the new interface and is fine.
 			 *
-			 * 為什麼沒有 f/d：A27 有 FPU，但 userspace 是 soft-float（ilp32），
-			 * 而且 FP save/restore 路徑在這顆上行為不正常（claude-report.md 困難點 5）。
-			 * 宣告成 rv32imac 讓 kernel 的 has_fpu()=false、__switch_to_fpu 變成
-			 * no-op，context-switch 路徑上一條 FP 指令都不會出現。
-			 * 注意 prebuilt/busybox 也是照這個 ABI 編的——兩者必須一致，
-			 * 用 hard-float 的 binary 會在 __sigsetjmp 的 fsd 上 SIGILL。
+			 * Why there is no f/d: the A27 has an FPU, but userspace is
+			 * soft-float (ilp32), and the FP save/restore path misbehaves on this
+			 * core. Declaring rv32imac makes the kernel's has_fpu() false and
+			 * turns __switch_to_fpu into a no-op, so not one FP instruction
+			 * appears on the context-switch path.
+			 * Note that initramfs/prebuilt/busybox is built for the same ABI --
+			 * the two must agree, and a hard-float binary SIGILLs on the fsd in
+			 * __sigsetjmp.
 			 *
-			 * zicsr/zifencei/zicntr/zihpm 要明寫：「i 隱含它們」這個 quirk
-			 * （cpufeature.c:884）只存在於 legacy 路徑，新介面必須逐一列出
-			 * 才等價於 rv32imac。 */
+			 * zicsr/zifencei/zicntr/zihpm must be spelled out: the "i implies
+			 * them" quirk (cpufeature.c:884) exists only on the legacy path, so
+			 * the new interface has to list each one to be equivalent to
+			 * rv32imac. */
 			riscv,isa-base = "rv32i";
 			riscv,isa-extensions = "i", "m", "a", "c",
 					       "zicsr", "zifencei", "zicntr", "zihpm";
@@ -76,13 +84,14 @@
 		#size-cells = <1>;
 		ranges;
 
-		/* 保留給 vendor OpenSBI 的常駐區（原廠 boot.log: opensbi_base=0x80fc0000），
-		 * 256 KB 足夠涵蓋 fw + heap + per-hart scratch。
+		/* Reserved for the resident vendor OpenSBI region (factory boot.log:
+		 * opensbi_base=0x80fc0000); 256 KB covers fw + heap + per-hart scratch.
 		 *
-		 * 注意：走本 repo 的 FEL 路徑時，我們自己的 OpenSBI 是在 0x80000000，
-		 * 這塊其實用不到。保留它是因為 (a) 同一份 dts 也能餵給 vendor 開機鏈，
-		 * (b) 已驗證開機的記憶體佈局就是長這樣，拿掉等於改動一個實測過的組態
-		 * 卻換不到任何好處。 */
+		 * Note: on this repo's FEL path our own OpenSBI sits at 0x80000000 and
+		 * this region is unused. It is kept because (a) the same dts can still be
+		 * fed to the vendor boot chain, and (b) this is the memory layout that
+		 * was verified booting, and dropping it would change a tested
+		 * configuration for no gain. */
 		opensbi@80fc0000 {
 			reg = <0x80fc0000 0x00040000>;
 			no-map;
@@ -107,31 +116,28 @@
 		 *     (PERI PLL 3072 MHz / 16); boot.log prints "uartclk 192000000"
 		 *     and "base_baud = 12000000". 115200 divisor = 192e6/(16*115200)
 		 *     = 104. (The old 24 MHz here was wrong -> 8x-too-fast garbage.)
-		 * IRQ MODE (re-armed 2026-08-11, see claude-report.md §29): hwirq 3 comes
-		 * from the vendor dtsi (sun300iw1p1.dtsi:496); PLIC #interrupt-cells = 2
-		 * so the cells are <hwirq, IRQ_TYPE_LEVEL_HIGH>. This line WAS commented
-		 * out because the board RESET on the first interactive RX -- but that was
-		 * observed under the VENDOR OpenSBI, the same firmware that also produced
-		 * the silent 62s deadman, the fid-33 ebreak halt and the uncatchable-CSR
-		 * resets. Since §21 we run our own OpenSBI master with the A27 fixes
-		 * (CLEAR_MDT/mstatush, CSR guards, delegation) and the IRQ path has never
-		 * been retried on it. §15.28 had narrowed the fault to "idle-exit -> trap
-		 * entry, BEFORE serial8250_read_char", which is exactly the M-mode code
-		 * that got replaced -- so the old conclusion has no basis on this stack.
-		 * CONFIRM WITH BOTH: (a) boot line "ttyS0 at MMIO ... (irq = <N>" with N
-		 * non-zero -- proves the DT property parsed and the PLIC domain mapped it,
-		 * but that is software bookkeeping only and a WRONG hwirq also passes;
-		 * (b) /proc/interrupts row for the UART whose count RISES as you type --
-		 * that needs the real wire, so it is the decisive one.
-		 * POLLED FALLBACK: if the reset returns, comment this line out again --
-		 * the 8250 core then polls RX on a timer (irq=0), TX fine, RX with a few
-		 * ms latency, and there is no IRQ path at all. */
+		 * IRQ MODE: hwirq 3 comes from the vendor dtsi (sun300iw1p1.dtsi:496);
+		 * PLIC #interrupt-cells = 2, so the cells are <hwirq,
+		 * IRQ_TYPE_LEVEL_HIGH>. This line used to be commented out because the
+		 * board reset on the first interactive RX -- but that was observed under
+		 * the VENDOR OpenSBI, the same firmware behind the silent 62 s deadman,
+		 * the fid-33 ebreak halt and the uncatchable CSR resets. On our own
+		 * OpenSBI master with the A27 fixes (CLEAR_MDT/mstatush, CSR guards,
+		 * delegation) the interrupt path is verified working: the boot line
+		 * reports irq = 12, and the /proc/interrupts count for ttyS0 rises with
+		 * typing (165 -> 452) with no reset. Both halves matter -- a non-zero irq
+		 * = N only proves the DT property parsed and the PLIC domain mapped it,
+		 * since a wrong hwirq prints a non-zero N too; the rising count is the
+		 * one that needs the real wire.
+		 * POLLED FALLBACK: if the reset ever comes back, comment this line out
+		 * again -- the 8250 core then polls RX on a timer (irq=0): TX fine, RX
+		 * with a few ms of latency, and no IRQ path at all. */
 		uart0: serial@42500000 {
 			compatible = "snps,dw-apb-uart";
 			reg = <0x42500000 0x400>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			interrupts-extended = <&plic 3 4>;  // hwirq 3: caused reset-on-RX
+			interrupts-extended = <&plic 3 4>;  // hwirq 3 from the vendor dtsi
 			clock-frequency = <192000000>;	/* pll-peri-cko-192m; div=104 @115200 */
 			current-speed = <115200>;
 			status = "okay";

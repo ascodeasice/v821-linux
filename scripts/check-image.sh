@@ -1,11 +1,12 @@
 #!/bin/sh
-# 上板前的最後一道 host 端關卡。
+# The last host-side gate before going to the board.
 #
-# 為什麼要有：換 toolchain 之後，有兩種失敗會讓板子完全靜音、而且症狀跟
-# 「沒進 FEL」一模一樣，用 power-cycle 去 debug 非常昂貴。這兩種都可以在
-# host 上用一行指令抓出來，所以就抓在這裡。
+# Why it exists: after a toolchain change, two kinds of failure leave the board
+# completely silent with symptoms identical to "never entered FEL", and debugging
+# those by power-cycling is expensive. Both are catchable on the host with one
+# command, so they are caught here.
 #
-# 用法：check-image.sh <CROSS> <KOUT> <BUILD> <FW>
+# Usage: check-image.sh <CROSS> <KOUT> <BUILD> <FW>
 set -e
 
 CROSS=$1; KOUT=$2; BUILD=$3; FW=$4
@@ -13,68 +14,71 @@ TOP=$(cd "$(dirname "$0")/.." && pwd)
 fail=0
 say() { printf '%-46s %s\n' "$1" "$2"; }
 
-echo "== 上板前靜態檢查 =="
+echo "== static checks before flashing =="
 
-# 1. A27 沒有 Zacas / Zabha。
-# arch/riscv/Makefile 是看 CONFIG_TOOLCHAIN_HAS_ZACAS/ZABHA（toolchain 有沒有能力），
-# 不是看 CONFIG_RISCV_ISA_ZACAS（我們有沒有要用），所以 binutils 2.38 以上會讓
-# _zacas_zabha 自動進 -march，gcc 就被授權發 amocas.* 與 byte/halfword 的 amo*.b/.h。
-# A27 兩個都沒有，執行到就是沒有 handler 的 illegal instruction。
+# 1. The A27 has neither Zacas nor Zabha.
+# arch/riscv/Makefile keys off CONFIG_TOOLCHAIN_HAS_ZACAS/ZABHA (what the toolchain
+# can do), not CONFIG_RISCV_ISA_ZACAS (what we asked for), so binutils 2.38+ lets
+# _zacas_zabha into -march and authorises gcc to emit amocas.* and byte/halfword
+# amo*.b/.h. The A27 has neither, and hitting one is an illegal instruction with no
+# handler.
 if [ -f "$KOUT/vmlinux" ]; then
 	hits=$("${CROSS}objdump" -d "$KOUT/vmlinux" 2>/dev/null \
 	       | grep -cE '\bamocas\.|\bamo(add|and|or|swap|xor|max|min)u?\.(b|h)\b' || true)
 	if [ "$hits" -eq 0 ]; then
-		say "vmlinux 沒有 Zacas/Zabha 指令" "ok"
+		say "vmlinux free of Zacas/Zabha instructions" "ok"
 	else
-		say "vmlinux 沒有 Zacas/Zabha 指令" "找到 $hits 處 — A27 執行到會 illegal instruction"
+		say "vmlinux free of Zacas/Zabha instructions" "$hits found - illegal instruction on the A27"
 		"${CROSS}objdump" -d "$KOUT/vmlinux" \
 		  | grep -nE '\bamocas\.|\bamo(add|and|or|swap|xor|max|min)u?\.(b|h)\b' | head -10 | sed 's/^/    /'
 		fail=1
 	fi
 else
-	say "vmlinux" "找不到 $KOUT/vmlinux"; fail=1
+	say "vmlinux" "$KOUT/vmlinux not found"; fail=1
 fi
 
-# 2. Image 必須是 rv32
+# 2. The Image must be rv32
 if [ -f "$KOUT/vmlinux" ]; then
 	cls=$("${CROSS}readelf" -h "$KOUT/vmlinux" | awk '/Class:/{print $2}')
-	[ "$cls" = "ELF32" ] && say "vmlinux 是 ELF32" "ok" \
-	                     || { say "vmlinux 是 ELF32" "是 $cls，config 跑掉了"; fail=1; }
+	[ "$cls" = "ELF32" ] && say "vmlinux is ELF32" "ok" \
+	                     || { say "vmlinux is ELF32" "got $cls, the config has drifted"; fail=1; }
 fi
 
-# 3. stub 與 golden 相同。這一項同時抓到 PIE、build-id note 與 codegen 漂移
+# 3. Stub matches golden. This one check catches PIE, the build-id note, and codegen
+# drift at the same time.
 if [ -f "$BUILD/a27_stub.bin" ]; then
 	if cmp -s "$BUILD/a27_stub.bin" "$TOP/boot/a27_stub.bin.golden"; then
-		say "a27_stub 與 golden 相同" "ok（$(stat -c%s "$BUILD/a27_stub.bin") bytes）"
+		say "a27_stub matches golden" "ok ($(stat -c%s "$BUILD/a27_stub.bin") bytes)"
 	else
-		say "a27_stub 與 golden 相同" "不同 — 上板前先 objdump -d 對照"
+		say "a27_stub matches golden" "differs - diff objdump -d before flashing"
 		fail=1
 	fi
 else
-	say "a27_stub.bin" "還沒編"; fail=1
+	say "a27_stub.bin" "not built yet"; fail=1
 fi
 
-# 4. prebuilt 的 ABI 要跟 dts 宣告的一致。hard-float 的 binary 會在 __sigsetjmp 的 fsd 上 SIGILL
+# 4. The prebuilt ABI must match what the dts declares. A hard-float binary SIGILLs
+# on the fsd in __sigsetjmp.
 for b in busybox; do
 	d=$(file -b "$TOP/initramfs/prebuilt/$b" 2>/dev/null || echo missing)
 	case "$d" in
-	    *"ELF 32-bit"*"RISC-V"*"soft-float"*static*) say "initramfs/prebuilt/$b 是 rv32 soft-float static" "ok" ;;
-	    *) say "initramfs/prebuilt/$b 是 rv32 soft-float static" "不對：$d"; fail=1 ;;
+	    *"ELF 32-bit"*"RISC-V"*"soft-float"*static*) say "initramfs/prebuilt/$b is rv32 soft-float static" "ok" ;;
+	    *) say "initramfs/prebuilt/$b is rv32 soft-float static" "wrong: $d"; fail=1 ;;
 	esac
 done
 
-# 5. fw_payload 大小合理。太小通常表示 payload 沒包進去
+# 5. fw_payload size is plausible. Too small usually means the payload was not packed.
 if [ -f "$FW" ]; then
 	sz=$(stat -c%s "$FW")
 	if [ "$sz" -gt 8000000 ] && [ "$sz" -lt 20000000 ]; then
-		say "fw_payload 大小" "ok（$sz bytes）"
+		say "fw_payload size" "ok ($sz bytes)"
 	else
-		say "fw_payload 大小" "$sz bytes，不在 8-20 MB，payload 可能沒包進去"; fail=1
+		say "fw_payload size" "$sz bytes, outside 8-20 MB, the payload may be missing"; fail=1
 	fi
 else
-	say "fw_payload" "找不到 $FW"; fail=1
+	say "fw_payload" "$FW not found"; fail=1
 fi
 
 echo
-[ "$fail" -eq 0 ] && echo "靜態檢查通過，可以進 FEL 跑 make boot。" \
-                  || { echo "有項目沒過。上面每一項都不需要板子就能修，先修完再上板。"; exit 1; }
+[ "$fail" -eq 0 ] && echo "Static checks passed. Enter FEL and run make boot." \
+                  || { echo "Some checks failed. Every one of them is fixable without the board - fix them first."; exit 1; }

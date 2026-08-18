@@ -21,8 +21,9 @@ echo "TMR_A=$(/bin/busybox cut -d' ' -f1 /proc/uptime)"
 echo "TMR_B=$(/bin/busybox cut -d' ' -f1 /proc/uptime)"
 
 # CPU-clock probes -- see claude-report.md §30.
-# (1) absolute: A27 clock 的 mux 設定。絕對頻率一律以 felcpux 印的暫存器推導為準
-# （HOSC 40MHz x N/D），板子上沒有任何暫存器會報告 A27 實際跑幾 Hz。
+# (1) absolute: the A27 clock mux setting. Absolute frequency is always derived from
+# the registers felcpux prints (HOSC 40 MHz x N/D) -- no register on this board
+# reports the rate the A27 is actually running at.
 echo "CLK_REG_NOW=$(/bin/busybox devmem 0x4A010588)"
 # (2) relative: a fixed shell loop timed against the (already-verified) timer.
 echo "CPU_A=$(/bin/busybox cut -d' ' -f1 /proc/uptime)"

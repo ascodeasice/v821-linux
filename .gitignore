@@ -1,4 +1,4 @@
-# 抓下來的原始碼與所有 build 產物都在這裡
+# Fetched sources and every build product live here
 /build/
 
 __pycache__/

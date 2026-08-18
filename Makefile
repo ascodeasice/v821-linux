@@ -1,11 +1,12 @@
-# V821 (RV32) mainline Linux — 建置 DAG
+# V821 (RV32) mainline Linux — build DAG
 #
-#   make            # = make check：需要什麼就編什麼，最後跑上板前的靜態關卡
-#   make boot       # check 通過後進 FEL 開機（板子要先按 FEL 鈕重插 USB）
-#   make help       # 列出所有 target
+#   make            # = make check: build whatever is stale, then run the host-side gates
+#   make boot       # after check passes, boot over FEL (hold FEL, replug USB first)
+#   make help       # list every target
 #
-# 為什麼要有這個 DAG：手打三行指令時，順序錯一次（先 dtc 才改 .dts、或改完 dts
-# 只跑到第 2 步）就會靜靜包到舊的 dtb，板子照常開機、只是跑錯設定。
+# Why a DAG at all: typing the three commands by hand gets the order wrong exactly
+# once (dtc before editing the .dts, or editing the dts and stopping after step 2)
+# and an old dtb is packed silently. The board still boots, just with wrong config.
 
 TOP   := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 BUILD ?= $(TOP)/build
@@ -15,15 +16,17 @@ LINUX   ?= $(BUILD)/linux
 OPENSBI ?= $(BUILD)/opensbi
 KOUT    ?= $(BUILD)/kernel
 
-# 不要叫 O。kernel kbuild 用 O= 指定輸出目錄，但 OpenSBI 的 Makefile:24 也有
-# ifdef O，而 make 會把環境變數當成 make 變數——所以 shell 裡只要 export 過 O，
-# OpenSBI 就會把 fw_payload 蓋到那個目錄，於是「make 明明成功、燒上去的卻是舊的」。
+# Do not name this O. Kernel kbuild takes O= as its output directory, but OpenSBI's
+# Makefile:24 also has an ifdef O, and make promotes environment variables to make
+# variables — so merely having O exported in the shell makes OpenSBI drop fw_payload
+# into that directory, and "make succeeded but the flashed image is the old one".
 unexport O
 
-# 預設用發行版的 cross toolchain（Arch: pacman -S riscv64-linux-gnu-gcc）。
-# 要換 XuanTie 就 make CROSS=/abs/path/to/riscv64-unknown-linux-gnu-。
-# 帶路徑的 CROSS 一律轉絕對路徑：make -C 會切到 kernel tree 執行，相對路徑會被
-# 解析到那邊去，kconfig 的 syncconfig 會在最前面就以 "C compiler not found" 死掉。
+# Default to the distro cross toolchain (Arch: pacman -S riscv64-linux-gnu-gcc).
+# For XuanTie: make CROSS=/abs/path/to/riscv64-unknown-linux-gnu-.
+# A CROSS containing a slash is made absolute: make -C runs inside the kernel tree,
+# so a relative path would resolve there instead, and kconfig's syncconfig dies up
+# front with "C compiler not found".
 CROSS ?= riscv64-linux-gnu-
 ifneq ($(findstring /,$(CROSS)),)
 CROSS := $(abspath $(dir $(CROSS)))/$(notdir $(CROSS))
@@ -32,16 +35,18 @@ endif
 NPROC ?= $(shell nproc 2>/dev/null || echo 4)
 KMAKE := $(MAKE) -C $(LINUX) O=$(KOUT) ARCH=riscv CROSS_COMPILE=$(CROSS)
 
-# 位元組可重現：兩個人在不同機器、不同目錄下編，要得到同一顆 fw_payload.bin。
-# 不設的話有兩個變動來源——kernel banner 的建置時間，以及 initramfs cpio 標頭裡
-# 的檔案 mtime（git checkout 出來的時間各人不同）。這個變數兩處都管：
-# banner 直接用它，cpio 是 usr/Makefile:67 把它當 gen_initramfs.sh 的 -d 傳進去。
-# 要看真實建置時間就 make KBUILD_BUILD_TIMESTAMP="$(date)"。
+# Byte reproducibility: two people building on different machines in different
+# directories must get the same fw_payload.bin. Left alone there are two sources of
+# variance — the build timestamp in the kernel banner, and the file mtimes in the
+# initramfs cpio headers (whenever git checkout happened to run). This one variable
+# covers both: the banner uses it directly, and usr/Makefile:67 passes it to
+# gen_initramfs.sh as -d. For a real timestamp: make KBUILD_BUILD_TIMESTAMP="$(date)".
 export KBUILD_BUILD_TIMESTAMP ?= 2026-08-13 00:00:00 UTC
 export KBUILD_BUILD_USER      ?= v821
 export KBUILD_BUILD_HOST      ?= v821-linux
-# banner 的 #N 來自 objtree 的 .version，每 link 一次就加一，所以同一份原始碼在
-# 「編過幾次的樹」與「剛 clone 的樹」會得到不同的數字（init/Makefile:32）。
+# The #N in the banner comes from .version in objtree and increments on every link,
+# so the same source gives different numbers in a tree that has been built before and
+# in a freshly cloned one (init/Makefile:32).
 export KBUILD_BUILD_VERSION   ?= 1
 
 DTS   := $(TOP)/boot/v821-min.dts
@@ -55,43 +60,45 @@ STAMP := $(BUILD)/.src-stamp
 .PHONY: all help tools src dtb stub kernel fw verify check boot boot-nopll \
         config-diff patch-check menuconfig clean distclean
 
-all: check  ## 編到上板前的靜態關卡（預設）
+all: check  ## build up to the host-side gates (default)
 
-help:  ## 列出 target
+help:  ## list targets
 	@grep -hE '^[a-z][a-z-]*:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t28
 
 $(BUILD):
 	@mkdir -p $@
 
-# ---- 工具鏈與原始碼 ----
+# ---- toolchain and sources ----
 
-tools:  ## 檢查 host 工具與 cross toolchain 真的能編 rv32
+tools:  ## check host tools, and that the cross toolchain really builds rv32
 	@sh $(TOP)/scripts/check-tools.sh $(CROSS)
 
 $(STAMP): $(TOP)/pins.env $(wildcard $(TOP)/patches/linux-*.patch) $(wildcard $(TOP)/patches/opensbi-*.patch) | $(BUILD)
 	@BUILD=$(BUILD) sh $(TOP)/scripts/fetch.sh
 	@touch $@
 
-src: $(STAMP)  ## 抓 linux 與 opensbi 到釘住的 commit 並套 patch
+src: $(STAMP)  ## fetch linux and opensbi at the pinned commits and apply patches
 
 # ---- device tree ----
 
-# -p 0x4000 不可省：OpenSBI 是原地 fixup 這顆 FDT（fw_base.S 的 lla a1, fw_fdt_bin），
-# padding 就是 fdt_open_into() 撐大時要用的空間。
+# -p 0x4000 is not optional: OpenSBI fixes this FDT up in place (lla a1, fw_fdt_bin
+# in fw_base.S), and the padding is the room fdt_open_into() needs to grow it.
 $(DTB): $(DTS) | $(BUILD)
 	dtc -O dtb -p 0x4000 -o $@ $<
 
-dtb: $(DTB)  ## 只重編 device tree
+dtb: $(DTB)  ## rebuild the device tree only
 
 # ---- A27 entry stub ----
 
-# -fno-pie -no-pie -Wl,--build-id=none 不可省：發行版 gcc 多半是 --enable-default-pie，
-# 而 -Ttext= 配 default PIE 會產生沒人套用的 R_RISCV_RELATIVE relocation；
-# build-id note 則會拿到 0x83f00000 以下的位址，objcopy 會把 note 排在 code 前面，
-# A27 出 reset 後第一件事就是執行 note header。兩種都是板子全靜音、沒有任何訊息。
-# -march 要帶 _zicsr_zifencei，理由跟下面 OpenSBI 那條一樣：stub 裡有 csrw/csrs/
-# csrr 與 fence.i，binutils 2.36 之後這些不在 base I 裡面。加了之後兩套 toolchain
-# 編出來的位元組都跟 golden 相同，所以只是換一種寫法、不是換指令。
+# -fno-pie -no-pie -Wl,--build-id=none are not optional: distro gcc is usually
+# --enable-default-pie, and -Ttext= with default PIE emits R_RISCV_RELATIVE
+# relocations nobody applies; the build-id note lands below 0x83f00000 and objcopy
+# places it ahead of the code, so the first thing the A27 executes out of reset is a
+# note header. Both failures are a completely silent board.
+# -march needs _zicsr_zifencei for the same reason as OpenSBI below: the stub uses
+# csrw/csrs/csrr and fence.i, which binutils 2.36 moved out of base I. With the
+# string added, both toolchains emit bytes identical to the golden file — a different
+# spelling, not different instructions.
 $(BUILD)/a27_stub.elf: $(TOP)/boot/a27_stub.S | $(BUILD)
 	$(CROSS)gcc -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -fno-pie -no-pie \
 	    -Wl,--build-id=none -Ttext=0x83f00000 -o $@ $<
@@ -99,11 +106,11 @@ $(BUILD)/a27_stub.elf: $(TOP)/boot/a27_stub.S | $(BUILD)
 $(STUB): $(BUILD)/a27_stub.elf
 	$(CROSS)objcopy -O binary $< $@
 	@cmp $@ $(TOP)/boot/a27_stub.bin.golden \
-	  && echo "  stub 與 golden 相同（134 bytes）" \
-	  || { echo "!! stub 與 a27_stub.bin.golden 不同。toolchain 換了 codegen，"; \
-	       echo "!! 上板前先用 $(CROSS)objdump -d $< 對照，確認沒有多出 PIE/note。"; exit 1; }
+	  && echo "  stub matches golden (134 bytes)" \
+	  || { echo "!! stub differs from boot/a27_stub.bin.golden. The toolchain changed"; \
+	       echo "!! codegen. Diff $(CROSS)objdump -d $< first, check for PIE/note."; exit 1; }
 
-stub: $(STUB)  ## 編 A27 entry stub 並與 golden 比對
+stub: $(STUB)  ## build the A27 entry stub and compare against golden
 
 # ---- initramfs ----
 
@@ -112,63 +119,67 @@ $(IRFS): $(TOP)/initramfs/initramfs.list.in $(TOP)/initramfs/prebuilt/busybox $(
 
 # ---- kernel ----
 
-# CONFIG_INITRAMFS_SOURCE 是絕對路徑，所以不寫進 checked-in 的 defconfig，
-# 改成這裡注入。這樣 defconfig 本身跟機器無關。
+# CONFIG_INITRAMFS_SOURCE is an absolute path, so it is not written into the
+# checked-in defconfig; it is injected here instead. That keeps the defconfig
+# machine independent.
 $(KOUT)/.config: $(TOP)/config/v821_rv32_defconfig $(IRFS) $(STAMP)
 	install -Dm644 $(TOP)/config/v821_rv32_defconfig $(LINUX)/arch/riscv/configs/v821_rv32_defconfig
 	$(KMAKE) v821_rv32_defconfig
 	$(LINUX)/scripts/config --file $@ --set-str INITRAMFS_SOURCE $(IRFS)
 	$(KMAKE) olddefconfig
 
-kernel: $(KOUT)/.config $(IRFS) $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/init.sh  ## 編 kernel Image（initramfs 內建）
+kernel: $(KOUT)/.config $(IRFS) $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/init.sh  ## build the kernel Image (initramfs built in)
 	$(KMAKE) -j$(NPROC) Image
 
 $(IMAGE): kernel
 
-menuconfig: $(KOUT)/.config  ## 改 config（改完記得 make config-diff 更新 defconfig）
+menuconfig: $(KOUT)/.config  ## change config (run make config-diff afterwards)
 	$(KMAKE) menuconfig
 
 # ---- OpenSBI ----
 
-# CC_SUPPORT_VECTOR=n：A27 沒有 V extension，編進去只是死碼。
-# （這個旗標最早是為了繞過 XuanTie binutils 2.35 組不出 vector 指令，
-#   binutils 2.38 之後已經不需要，但保留它可以讓 firmware 內容跟實機驗過的那顆一致。）
+# CC_SUPPORT_VECTOR=n: the A27 has no V extension, so building it in is dead code.
+# (The flag started as a workaround for XuanTie binutils 2.35 not assembling vector
+#  instructions. binutils 2.38 no longer needs it, but keeping it makes the firmware
+#  contents match the one verified on hardware.)
 #
-# ISA 字串要帶 _zicsr_zifencei：binutils 2.36 把 fence.i 與 CSR 指令從 base I 移到
-# Zifencei / Zicsr，而 fw_base.S:829 有 fence.i。OpenSBI 自己有偵測（Makefile:322），
-# 但只在沒有明確傳 PLATFORM_RISCV_ISA 時才會補，我們有傳所以要自己帶。
-# binutils 2.35（XuanTie 那套）也吃這個寫法，兩邊通用。
-fw: $(DTB) kernel $(STAMP)  ## 把 kernel 與 dtb 包進 OpenSBI fw_payload
+# The ISA string needs _zicsr_zifencei: binutils 2.36 moved fence.i and the CSR
+# instructions out of base I into Zifencei / Zicsr, and fw_base.S:829 has a fence.i.
+# OpenSBI detects this itself (Makefile:322), but only when PLATFORM_RISCV_ISA is not
+# passed explicitly — and we pass it, so we spell it out. binutils 2.35 (the XuanTie
+# set) accepts the same spelling, so one string works for both.
+fw: $(DTB) kernel $(STAMP)  ## pack kernel and dtb into an OpenSBI fw_payload
 	$(MAKE) -C $(OPENSBI) PLATFORM=generic CROSS_COMPILE=$(CROSS) \
 	    PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ISA=rv32imafdc_zicsr_zifencei \
 	    PLATFORM_RISCV_ABI=ilp32d \
 	    FW_TEXT_START=0x80000000 FW_PIC=y CC_SUPPORT_VECTOR=n \
 	    FW_FDT_PATH=$(DTB) FW_PAYLOAD_PATH=$(IMAGE) -j$(NPROC)
 
-# ---- 上板前的關卡 ----
+# ---- gates before touching the board ----
 
-verify: fw  ## 把內嵌的 FDT 從 fw_payload 挖出來看
+verify: fw  ## dig the embedded FDT back out of fw_payload and read it
 	@sh $(TOP)/scripts/verify-fw.sh $(FW)
 
-check: verify $(STUB)  ## verify + 靜態掃描（最後一道 host 端關卡）
+check: verify $(STUB)  ## verify + static scan (the last host-side gate)
 	@sh $(TOP)/scripts/check-image.sh $(CROSS) $(KOUT) $(BUILD) $(FW)
 
-# ---- 上板 ----
+# ---- on the board ----
 
-boot: check  ## 進 FEL 開機（按 FEL 鈕重插 USB 之後再跑）
+boot: check  ## boot over FEL (hold FEL, replug USB, then run this)
 	python3 $(TOP)/scripts/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux.log --secs=120
 
-# 重現「A27 直接掛在 HOSC 40 MHz」的慢速態。只用來取對照數據，平常不要用。
-boot-nopll: check  ## 慢速態對照組（A27 掛 HOSC，開機要 ~205 秒）
+# Reproduce the slow state where the A27 hangs directly off HOSC at 40 MHz. Control
+# data only; do not use it for normal boots.
+boot-nopll: check  ## slow-state control run (A27 on HOSC, ~205 s to shell)
 	python3 $(TOP)/scripts/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux-nopll.log \
 	    --no-pll --secs=700
 
-# ---- 重現用 ----
+# ---- reproduction ----
 
-config-diff: $(KOUT)/.config  ## 重產 v821_rv32_defconfig 與 config-diff.txt
+config-diff: $(KOUT)/.config  ## regenerate config/v821_rv32_defconfig and config/config-diff.txt
 	@sh $(TOP)/scripts/config-diff.sh $(LINUX) $(KOUT) $(BUILD) $(CROSS) $(TOP)
 
-patch-check: $(STAMP)  ## 確認 patch 仍然對得上釘住的 commit
+patch-check: $(STAMP)  ## confirm the patches still line up with the pinned commits
 	@for p in $(TOP)/patches/linux-*.patch; do \
 	    git -C $(LINUX) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
@@ -176,11 +187,11 @@ patch-check: $(STAMP)  ## 確認 patch 仍然對得上釘住的 commit
 	    git -C $(OPENSBI) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
 
-# ---- 清理 ----
+# ---- cleaning ----
 
-clean:  ## 砍 build 產物，保留抓下來的原始碼
+clean:  ## remove build products, keep the fetched sources
 	rm -rf $(KOUT) $(DTB) $(STUB) $(BUILD)/a27_stub.elf $(IRFS)
 	rm -f $(OPENSBI)/build/platform/generic/firmware/fw_payload.*
 
-distclean:  ## 連抓下來的 linux 與 opensbi 一起砍（linux clone 大約 4 GB，重抓很久）
+distclean:  ## also remove the fetched linux and opensbi (the linux clone is ~4 GB)
 	rm -rf $(BUILD)

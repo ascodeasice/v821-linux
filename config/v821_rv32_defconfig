@@ -1,7 +1,7 @@
 # V821 (Allwinner sun300iw1p1) RV32 minimal bring-up.
-# 從已驗證開機的 .config 用 `make savedefconfig` 產生。
-# CONFIG_INITRAMFS_SOURCE 刻意不寫在這裡：它是絕對路徑，由 Makefile 在 build 時
-# 用 scripts/config 注入 $(BUILD)/initramfs.list。
+# Generated from the .config verified on hardware with `make savedefconfig`.
+# CONFIG_INITRAMFS_SOURCE is deliberately absent: it is an absolute path, and
+# the Makefile injects $(BUILD)/initramfs.list at build time via scripts/config.
 CONFIG_SYSVIPC=y
 CONFIG_NO_HZ_IDLE=y
 CONFIG_HIGH_RES_TIMERS=y

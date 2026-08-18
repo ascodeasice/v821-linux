@@ -1,55 +1,60 @@
-# prebuilt — 為什麼這裡有一個 binary
+# prebuilt — why there is a binary in here
 
-`busybox` 是 rv32imac / ilp32 soft-float 的 static ELF，直接 check 進 repo。
-會這樣做是因為**發行版的 riscv64 cross toolchain 編不出 rv32 的 userspace**。
+`busybox` is an rv32imac / ilp32 soft-float static ELF, checked straight into the repo.
+It is here because **the distro riscv64 cross toolchain cannot build rv32 userspace**.
 
-Arch 的 `riscv64-linux-gnu-gcc` 依賴 `riscv64-linux-gnu-glibc`，而那個套件只有
-`ld-linux-riscv64-lp64d.so.1`，整包 1559 個檔案裡沒有任何 `ilp32` 或 `rv32` 的
-runtime。套件描述寫的「Cross compiler for 32-bit and 64-bit RISC-V」講的是
-binutils 的 BFD 目標覆蓋，不是有 rv32 的 libc。實際去編會停在：
+Arch's `riscv64-linux-gnu-gcc` depends on `riscv64-linux-gnu-glibc`, and that package
+ships only `ld-linux-riscv64-lp64d.so.1` — none of its 1559 files is an `ilp32` or
+`rv32` runtime. The package description's "Cross compiler for 32-bit and 64-bit RISC-V"
+refers to binutils' BFD target coverage, not to having an rv32 libc. Actually trying it
+stops at:
 
 ```
 riscv64-linux-gnu-ld: cannot find crt1.o: No such file or directory
 riscv64-linux-gnu-ld: cannot find -lc
 ```
 
-kernel、OpenSBI、`a27_stub` 不受影響，它們全程 freestanding、不連 libc 也不連 libgcc
-（kernel 的 `__ashldi3` 之類來自 `CONFIG_GENERIC_LIB_*`，OpenSBI 的 64-bit 除法來自
-`lib/utils/libquad/`）。所以只有 userspace 這一塊需要 prebuilt。
+The kernel, OpenSBI and `a27_stub` are unaffected: all three are freestanding
+throughout and link neither libc nor libgcc (the kernel's `__ashldi3` and friends come
+from `CONFIG_GENERIC_LIB_*`, OpenSBI's 64-bit division from `lib/utils/libquad/`). So
+userspace is the only piece that needs a prebuilt.
 
-## 檔案
+## The file
 
-| 檔案 | 大小 | sha256 |
+| File | Size | sha256 |
 |---|---|---|
 | `busybox` | 1670248 | `12a7a01837e7e3ff5f6c8a663d810c674081e12a84413b9a7876568a4228f092` |
 
-它是：
+It is:
 
 ```
 ELF 32-bit LSB executable, UCB RISC-V, RVC, soft-float ABI, statically linked
 Tag_RISCV_arch: rv32i2p0_m2p0_a2p0_c2p0
 ```
 
-ABI 必須跟 `boot/v821-min.dts` 宣告的 `riscv,isa-extensions = "i","m","a","c"` 一致。
-換成 hard-float（ilp32d）的版本會在 glibc `__sigsetjmp` 的 `fsd` 指令上 SIGILL——
-dts 沒有宣告 F/D，kernel 就不開 FPU，第一條浮點指令直接 illegal instruction。
+The ABI has to match the `riscv,isa-extensions = "i","m","a","c"` declared in
+`boot/v821-min.dts`. A hard-float (ilp32d) build SIGILLs on the `fsd` instruction in
+glibc's `__sigsetjmp`: the dts does not declare F/D, so the kernel never enables the
+FPU and the first floating-point instruction is an illegal instruction.
 
-## 要自己重編的話
+## Rebuilding it yourself
 
-需要一套帶 rv32 static libc 的 toolchain。兩條路：
+You need a toolchain with an rv32 static libc. Two options:
 
-**XuanTie（原本用的，實機驗過的就是這顆編的）**
+**XuanTie (what was originally used; the hardware-verified binary came from it)**
 
 ```sh
-# busybox 1.33.2，config 用 config/busybox-rv32.config
+# busybox 1.33.2, configured from config/busybox-rv32.config
 make CROSS_COMPILE=<xuantie>/bin/riscv64-unknown-linux-gnu- -j$(nproc)
 ```
 
-**zig（一個套件就有 musl 原始碼，沒有 multilib 問題，還沒實機驗過）**
+**zig (one package brings its own musl source, no multilib problem; not yet verified
+on hardware)**
 
 ```sh
-zig build-exe -target riscv32-linux-musl ...   # 還沒實際跑過 busybox 這一套
+zig cc -target riscv32-linux-musl -mcpu=generic_rv32+m+a+c -static -Os ...
 ```
 
-busybox 1.33.2 是 2021 年的東西，沒有 pin `-std`，用 gcc 15 編會撞上 gnu23 的預設
-（`bool`/`true`/`false` 變成關鍵字），要在 `CONFIG_EXTRA_CFLAGS` 補 `-std=gnu11`。
+busybox 1.33.2 is from 2021 and does not pin `-std`, so building it with gcc 15 runs
+into the gnu23 default (`bool`/`true`/`false` become keywords); add `-std=gnu11` to
+`CONFIG_EXTRA_CFLAGS`.

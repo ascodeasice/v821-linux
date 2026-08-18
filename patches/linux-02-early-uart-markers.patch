@@ -1,11 +1,13 @@
 V821 bring-up: early UART0 progress markers in head.S.
 
-MMU 還沒開的時候沒有 console，kernel 死在 _start_kernel 哪一段完全看不出來。
-DBGCH 直接對 UART0（位址 0x42500000，DW-APB，reg-shift 2，所以 LSR 在 +0x14）打單一字元，
-只用掉 t0/t1。marker 順序 A 3 4 7 8 對應：進入 S-mode / 清 sie+sip /
-寫完 scounteren / setup_vm 之前 / 開 MMU 之前。
+Before the MMU is on there is no console, so there is no way to tell which part of
+_start_kernel the kernel died in. DBGCH writes a single character straight to UART0
+(0x42500000, DW-APB, reg-shift 2, so LSR is at +0x14), clobbering only t0/t1. The
+marker sequence A 3 4 7 8 means: entered S-mode / cleared sie+sip / wrote scounteren /
+before setup_vm / before enabling the MMU.
 
-這是除錯用的，不是 port 的必要條件；不想要就別套這支。
+This is a debugging aid, not a requirement of the port; skip this patch if you do not
+want it.
 
 diff --git a/arch/riscv/kernel/head.S b/arch/riscv/kernel/head.S
 index 9c99c5ad6fe8..9510a0a8aa14 100644

@@ -1,11 +1,12 @@
 V821 RV32 bring-up: skip runtime alternative patching.
 
-apply_boot_alternatives() 的 RV32 alternative pass 會解出錯的 old_ptr，
-在 __patch_insn_write() 吃到 load page fault。我們跑的是最小 rv32imac config，
-沒有任何 errata / Z-ext alternative，所以未 patch 的預設路徑就是正確的 baseline。
+The RV32 alternative pass in apply_boot_alternatives() resolves a wrong old_ptr and
+takes a load page fault in __patch_insn_write(). We run a minimal rv32imac config with
+no errata and no Z-ext alternatives, so the unpatched default path is the correct
+baseline.
 
-尚未 root-cause RV32 的 alt-entry 解析，所以這支還不能上游。
-見 claude-report.md 困難點 3。
+The RV32 alt-entry resolution has not been root-caused yet, so this is not
+upstreamable as it stands.
 
 diff --git a/arch/riscv/kernel/alternative.c b/arch/riscv/kernel/alternative.c
 index 7642704c7f18..1a8ac0cef8e1 100644

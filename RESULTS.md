@@ -1,15 +1,16 @@
-# RESULTS — 每個宣稱對應一條可以跑的指令
+# RESULTS — every claim, and the command that reproduces it
 
-報告裡講的每個數字，這裡都給出重現它的指令和該看到的證據行。分成兩組：
-**不用板子的**（任何人 clone 下來就能跑）與**要板子的**（需要一塊 AvaotaF1 進 FEL）。
+For every number in the write-up, this file gives the command that reproduces it and
+the evidence line to look for. Two groups: **no board required** (anyone who clones
+the repo can run these) and **board required** (needs an AvaotaF1 in FEL).
 
-跑之前先 `./build.sh`。
+Run `./build.sh` first.
 
 ---
 
-## 不用板子
+## No board required
 
-### R1 — 兩個人編出同一顆 firmware
+### R1 — two people build the same firmware
 
 ```sh
 git clone <repo> /tmp/a && cd /tmp/a && ./build.sh
@@ -17,25 +18,28 @@ git clone <repo> /tmp/b && cd /tmp/b && ./build.sh
 sha256sum /tmp/{a,b}/build/opensbi/build/platform/generic/firmware/fw_payload.bin
 ```
 
-兩行 sha256 相同。
+The two sha256 lines match.
 
-kernel 預設不是可重現建置，變動來源有兩個：banner 裡的建置時間戳，以及 initramfs
-cpio 標頭裡的檔案 mtime（`git checkout` 出來的時間每個人都不同）。`Makefile` 把
-`KBUILD_BUILD_TIMESTAMP` 釘死，這一個變數兩處都管——banner 直接用它，cpio 是
-`usr/Makefile:67` 把它當 `gen_initramfs.sh` 的 `-d` 傳下去。要看真實建置時間就
-`make KBUILD_BUILD_TIMESTAMP="$(date)"`。
+Kernel builds are not reproducible by default; there are two sources of variance: the
+build timestamp in the banner, and the file mtimes in the initramfs cpio headers
+(everyone's `git checkout` runs at a different time). The `Makefile` pins
+`KBUILD_BUILD_TIMESTAMP`, and that one variable covers both — the banner uses it
+directly, and `usr/Makefile:67` passes it to `gen_initramfs.sh` as `-d`. For a real
+build timestamp: `make KBUILD_BUILD_TIMESTAMP="$(date)"`.
 
-### R2 — fw_payload 裡面包的是對的 device tree
+### R2 — the device tree inside fw_payload is the right one
 
 ```sh
 make verify
 ```
 
-`make` 綠燈不等於包對。dtb 曾經因為 `dtc` 沒重跑而包了舊的一顆進去，板子照常
-開機、只是跑錯設定，完全沒有徵兆。這條把 FDT 從 firmware blob 裡挖回來看：
+A green `make` does not mean the right thing was packed. The dtb was once packed
+stale because `dtc` had not rerun; the board booted normally, just with the wrong
+configuration, with no symptom at all. This digs the FDT back out of the firmware
+blob:
 
 ```
-FDT 位於 0x24020，totalsize=18176
+FDT at 0x24020, totalsize=18176
 riscv,isa              Error at 'riscv,isa': FDT_ERR_NOTFOUND
 riscv,isa-base         rv32i
 riscv,isa-extensions   i m a c zicsr zifencei zicntr zihpm
@@ -47,76 +51,72 @@ uart0-clock            192000000
 plmt                   andestech,plmt0
 ```
 
-`riscv,isa` 顯示 `FDT_ERR_NOTFOUND` 是**預期的**，那正是這份 dts 的設計：只用
-`riscv,isa-base` / `riscv,isa-extensions` 這組新介面。它若突然出現，表示有人把
-legacy 屬性加回去了。
+`riscv,isa` showing `FDT_ERR_NOTFOUND` is **expected** — that is exactly what this dts
+is designed to do: the new `riscv,isa-base` / `riscv,isa-extensions` interface only.
+If it ever shows up, someone has added the legacy property back.
 
-### R3 — 新 toolchain 沒有發出 A27 沒有的指令
+### R3 — the new toolchain emits no instruction the A27 lacks
 
 ```sh
 make check
 ```
 
 ```
-vmlinux 沒有 Zacas/Zabha 指令              ok
+vmlinux free of Zacas/Zabha instructions       ok
 ```
 
-`arch/riscv/Makefile:83,86` 看的是 `CONFIG_TOOLCHAIN_HAS_ZACAS/ZABHA`（toolchain
-有沒有能力），不是 `CONFIG_RISCV_ISA_ZACAS`（我們有沒有要用）。binutils 2.38 以上
-會讓 `_zacas_zabha` 自動進 `-march`，gcc 就被授權發 `amocas.*` 與 byte/halfword 的
-`amo*.b/.h`。A27 兩個都沒有，執行到就是沒有 handler 的 illegal instruction。
+`arch/riscv/Makefile:83,86` keys off `CONFIG_TOOLCHAIN_HAS_ZACAS/ZABHA` (what the
+toolchain can do), not `CONFIG_RISCV_ISA_ZACAS` (what we asked for). binutils 2.38 and
+later let `_zacas_zabha` into `-march`, which authorises gcc to emit `amocas.*` and
+byte/halfword `amo*.b/.h`. The A27 has neither, and reaching one is an illegal
+instruction with no handler.
 
-手動版：
+By hand:
 
 ```sh
 riscv64-linux-gnu-objdump -d build/kernel/vmlinux \
   | grep -E '\bamocas\.|\bamo(add|and|or|swap|xor|max|min)u?\.(b|h)\b'
 ```
 
-無輸出才算過。
+No output means it passed.
 
-### R4 — stub 沒有被 PIE 或 build-id 汙染
+### R4 — the stub is not contaminated by PIE or a build-id
 
 ```sh
 make check
 ```
 
 ```
-a27_stub 與 golden 相同                     ok（134 bytes）
+a27_stub matches golden                        ok (134 bytes)
 ```
 
-發行版 gcc 多半是 `--enable-default-pie`。kernel 和 OpenSBI 都自己關掉了，stub 的
-build line 原本沒有。`-Ttext=` 配 default PIE 會產生沒人套用的 `R_RISCV_RELATIVE`；
-build-id note 則會拿到 `0x83f00000` 以下的位址，`objcopy -O binary` 把 note 排在
-code 前面，A27 出 reset 第一件事就是執行 note header。兩種都是板子全靜音、沒有
-任何訊息，跟「沒進 FEL」長得一模一樣。
+Distro gcc is usually `--enable-default-pie`. The kernel and OpenSBI both switch it
+off themselves; the stub's build line originally did not. `-Ttext=` with default PIE
+emits `R_RISCV_RELATIVE` relocations nobody applies, and the build-id note lands below
+`0x83f00000` where `objcopy -O binary` places it ahead of the code — so the first
+thing the A27 executes out of reset is a note header. Both failures leave the board
+completely silent, indistinguishable from "never entered FEL".
 
-134 bytes 的 golden binary 直接 check 在 repo 裡，`cmp` 不過就 build 失敗。這一項
-同時抓 PIE、build-id 與 codegen 漂移，成本是零。
+The 134-byte golden binary is checked into the repo, and a failing `cmp` fails the
+build. This one check catches PIE, the build-id and codegen drift at once, for free.
 
-### R5 — kernel config 的精簡是可檢查的
+### R5 — the kernel config trim is checkable
 
 ```sh
 make config-diff
-cat config-diff.txt
+cat config/config-diff.txt
 ```
 
-`config/v821_rv32_defconfig` 是 112 行，對應的 `.config` 是 1991 行。`config/config-diff.txt` 是
-兩份 `savedefconfig` 輸出的 diff，也就是相對於 Kconfig 預設值的最小表述，所以看到
-的就是真正做過的決定：21 個主動關掉的開關、23 項設定。
+`config/v821_rv32_defconfig` is 117 lines and expands to a 2031-line `.config`.
+`config/config-diff.txt` is the diff of two `savedefconfig` outputs — minimal
+expressions relative to the Kconfig defaults — so what you read is the decisions
+actually made: 25 switches deliberately turned off and 23 settings.
 
-直接對 `.config` 跑 `scripts/diffconfig` 會得到 4101 行，其中 3999 行是關掉
-NET / IIO / DRM 等上層開關之後的連鎖移除，沒有閱讀價值。
+Running `scripts/diffconfig` on the raw `.config` instead gives 4101 lines, of which
+3999 are cascaded removals from switching off NET / IIO / DRM and friends. Not worth
+reading.
 
-round-trip 可以自己驗：
-
-```sh
-diff <(grep '^CONFIG_\|^# CONFIG_' build/kernel/.config | sort) \
-     <(cd build/linux && ./scripts/config --file ../kernel/.config --state INITRAMFS_SOURCE >/dev/null; \
-       grep '^CONFIG_\|^# CONFIG_' ../kernel/.config | sort)
-```
-
-### R6 — patch 仍然對得上釘住的 commit
+### R6 — the patches still line up with the pinned commits
 
 ```sh
 make patch-check
@@ -128,72 +128,78 @@ make patch-check
   ok  opensbi-01-v821-a27-port.patch
 ```
 
-用 `git apply --check -R` 反向套用來驗，比正向套用更嚴格：它同時證明 patch 描述的
-改動確實在樹上、而且沒有被別的東西蓋掉。
+Verified by reverse-applying with `git apply --check -R`, which is stricter than
+applying forward: it proves both that the change the patch describes is present in the
+tree and that nothing else has overwritten it.
 
-### R7 — device tree 的最小化幅度
+### R7 — how far the device tree was minimised
 
 ```sh
-grep -c '' v821-min.dts                                    # 162 行（其中 85 行是註解）
-grep -v '^\s*\*\|^\s*/\*\|^\s*//\|^\s*$' v821-min.dts | grep -c ''   # 77 行實體
-dtc -I dtb -O dts build/v821-min.dtb | grep -c '{'         # 13（12 個節點加 root）
+grep -c '' boot/v821-min.dts                                     # 168 lines (91 of them comments)
+grep -v '^\s*\*\|^\s*/\*\|^\s*//\|^\s*$' boot/v821-min.dts | grep -c ''   # 77 substantive lines
+dtc -I dtb -O dts build/v821-min.dtb | grep -c '{'               # 13 (12 nodes plus root)
 ```
 
-12 個節點是：`chosen`、`aliases`、`cpus`、`cpu@0`、`cpu@0/interrupt-controller`、
-`memory@80000000`、`reserved-memory`、`opensbi@80fc0000`、`soc`、`serial@42500000`、
-`interrupt-controller@48000000`（PLIC）、`timer@48400000`（PLMT）。真正描述硬體的
-只有後面五個，其餘是 kernel 早期路徑要讀的 metadata。
+The 12 nodes are `chosen`, `aliases`, `cpus`, `cpu@0`, `cpu@0/interrupt-controller`,
+`memory@80000000`, `reserved-memory`, `opensbi@80fc0000`, `soc`, `serial@42500000`,
+`interrupt-controller@48000000` (PLIC) and `timer@48400000` (PLMT). Only the last five
+describe hardware; the rest is metadata the kernel's early path reads.
 
-vendor 的 `passed.dts` 是 2472 行、約 229 個節點，光 `soc@2002000` 就佔 1800 行。
-砍掉的 95% 就是整個設計的核心動作，每個節點留下的理由寫在 dts 的註解裡。
+The vendor's `passed.dts` is 2472 lines and roughly 229 nodes, with `soc@2002000`
+alone taking 1800 of them. Cutting 95% of that is the core move of the whole exercise,
+and the reason each surviving node is there is written in the dts comments.
 
 ---
 
-## 要板子（一次 power-cycle 可以全部驗完）
+## Board required (one power cycle covers all of it)
 
-按住 FEL 鈕重插 USB-OTG，確認 `xfel version` 看得到 V821，然後：
+Hold the FEL button, replug USB-OTG, confirm `xfel version` reports V821, then:
 
 ```sh
 make boot
 ```
 
-log 會同時寫到 `build/felcpux.log`。已驗證過的一份存在 `boot-reference.log`，可以
-直接對照。以下的檢查點是**有順序的**，卡在哪一點就知道問題落在哪一層。
+The log is also written to `build/felcpux.log`; a verified copy is kept in
+`boot-reference.log` for comparison. The checkpoints below are **ordered** — wherever
+it stops tells you which layer the problem is in.
 
-### R8 — HOSC 是 40 MHz、A27 跑在 960 MHz
+### R8 — HOSC is 40 MHz and the A27 runs at 960 MHz
 
-開機前的暫存器 readback：
+Register readback before boot:
 
 ```
-  HOSC=40 MHz（PLL_FUNC_CFG=0x00358041 DCXO_ST=0）
-  PLL_CPU=0xfb002f04（EN=1 lock=1 N=48 D=2 得 960 MHz）  A27_CLK=0x84000000（SEL=CPU_PLL）
+  HOSC=40 MHz (PLL_FUNC_CFG=0x00358041 DCXO_ST=0)
+  PLL_CPU=0xfb002f04 (EN=1 lock=1 N=48 D=2 gives 960 MHz)  A27_CLK=0x84000000 (SEL=CPU_PLL)
   ==> A27 CPU clock = 960 MHz
 ```
 
-mainline 沒有 CCU driver，`/sys/kernel/debug/clk/clk_summary` 在這個 build 只有表頭，
-所以這三行暫存器就是「CPU 到底跑多快」唯一的硬證據。欄位語意出自 SDK 的
-`include/arch/sun300iw1p1/clock_autogen_aon.h`：`PLL_FUNC_CFG`(0x404) bit31 `DCXO_ST`
-是 0 代表 40 MHz，`A27L2_CLK_REG`(0x588) 的 `SEL[26:24]` 是 4 代表 CPU_PLL。
+Mainline has no CCU driver, so `/sys/kernel/debug/clk/clk_summary` in this build has
+nothing but a header, which makes these three register lines the only hard evidence of
+how fast the CPU actually runs. The field meanings come from the SDK's
+`include/arch/sun300iw1p1/clock_autogen_aon.h`: `PLL_FUNC_CFG`(0x404) bit31 `DCXO_ST`
+= 0 means 40 MHz, and `SEL[26:24]` = 4 in `A27L2_CLK_REG`(0x588) means CPU_PLL.
 
-`N=48 D=2` 對應 SDK `clock.c:601-627` 的 40 MHz 分支。舊版無條件寫 24 MHz 那組
-（`N=40 D=1`），在這塊 40 MHz 的板子上等於 1600 MHz，也就是一直在超頻。
+`N=48 D=2` is the 40 MHz branch of SDK `clock.c:601-627`. An earlier version wrote the
+24 MHz set (`N=40 D=1`) unconditionally, which on this 40 MHz board is 1600 MHz —
+permanently overclocked.
 
-### R9 — A27 真的出 reset 了
+### R9 — the A27 really did come out of reset
 
 ```
-  START_ADD 回讀：0x83f00000（要 0x83f00000）
+  START_ADD readback: 0x83f00000 (want 0x83f00000)
 #YWV
 ```
 
-`#` 是 stub 的第一個字元，`Y`/`W`/`V` 分別是寫完 `mcache_ctl`、`mmisc_ctl`、
-準備跳進 OpenSBI。看到 `#` 就證明 A27 離開 reset 並在執行我們的程式碼——這是
-整個專案卡最久的一關（FEL 的 `xfel exec` 執行的是 E907，而 E907 物理上沒有
-Supervisor mode）。
+`#` is the stub's first character; `Y`, `W` and `V` mark `mcache_ctl` written,
+`mmisc_ctl` written, and about to jump into OpenSBI. Seeing `#` proves the A27 left
+reset and is executing our code — the step that took longest in this whole project,
+because FEL's `xfel exec` runs on the E907, and the E907 physically has no Supervisor
+mode.
 
-`START_ADD` 回讀不符時程式會直接停住不放核出來，因為在解 cfg reset 之前那個寫入
-會被忽略。
+If the `START_ADD` readback does not match, the script stops instead of releasing the
+core, because before the cfg reset is deasserted that write is ignored.
 
-### R10 — kernel 進到 S-mode 並拿到 console
+### R10 — the kernel reaches S-mode and gets a console
 
 ```
 A3478
@@ -203,28 +209,32 @@ Linux version 7.0.0-rc4-ga0c83177734a-dirty
 ttyS0 at MMIO 0x42500000 (irq = 12, base_baud = 12000000) is a 16550A
 ```
 
-`A3478` 是 `head.S` 的 marker（進 S-mode / 清 sie+sip / 寫完 scounteren /
-setup_vm 之前 / 開 MMU 之前），來自 `patches/linux-02-early-uart-markers.patch`。
-banner 裡的 `ga0c83177734a` 證明跑的就是釘住的那顆 commit。
-（沒有 `-rc4-00315-` 這種 commit 數，是因為 `scripts/fetch.sh` 用淺層 fetch 抓單一 commit，
-樹裡沒有 tag，`scripts/setlocalversion` 的 `git describe` 就退回只印 `-g<sha>`。
-`-dirty` 是因為 patch 是以工作區改動的形式套上去的，沒有 commit。）
+`A3478` is the marker from `head.S` (entered S-mode / cleared sie+sip / wrote
+scounteren / before setup_vm / before enabling the MMU), added by
+`patches/linux-02-early-uart-markers.patch`. The `ga0c83177734a` in the banner proves
+the running kernel is the pinned commit.
 
-### R11 — timer 頻率正確
+(There is no `-rc4-00315-` commit count because `scripts/fetch.sh` shallow-fetches a
+single commit, so the tree has no tags and `scripts/setlocalversion`'s `git describe`
+falls back to printing only `-g<sha>`. The `-dirty` is because the patches are applied
+as working-tree changes rather than committed.)
+
+### R11 — the timer frequency is right
 
 ```
 TMR_A=4.10
 TMR_B=9.16
 ```
 
-兩次 `/proc/uptime` 中間夾一個 `sleep 5`，差值要接近 5.0。這驗的是 dts 的
-`timebase-frequency = <40000000>` 跟 PLMT 的實際 mtime 速率一致。差太多就是
-那個數字寫錯了。
+Two reads of `/proc/uptime` with a `sleep 5` between them; the difference must be
+close to 5.0. This checks that the dts's `timebase-frequency = <40000000>` matches the
+PLMT's real mtime rate. A large discrepancy means that number is wrong.
 
-沒有 `andestech,plmt0` 這個節點的話，kernel 找不到 clocksource、退回 `jiffies`、
-拿不到 timer tick，會直接卡在 cpuidle，所有時間戳都是 `[0.000000]`。
+Without the `andestech,plmt0` node the kernel finds no clocksource, falls back to
+`jiffies`, gets no timer tick and hangs at cpuidle with every timestamp reading
+`[0.000000]`.
 
-### R12 — 開到互動 shell
+### R12 — boots to an interactive shell
 
 ```
 >>> V821 rv32 mainline on A27 (S-mode, own OpenSBI via FEL).
@@ -233,11 +243,12 @@ TMR_B=9.16
 >>> SHELL on A27!
 ```
 
-從放核出 reset 到這裡約 12 秒。
+About 12 seconds from releasing the core to this point.
 
-### R13 — 輸入 round-trip 與 PLIC 中斷
+### R13 — input round-trip and PLIC interrupts
 
-`make boot` 結束後板子還活著（felcpux 只是關掉 host 端的序列埠），接上打字：
+The board is still alive after `make boot` finishes (felcpux only closes the host-side
+serial port), so attach and type:
 
 ```
 / # echo hi
@@ -248,43 +259,50 @@ hi
  12:        100 SiFive PLIC   3 Edge      ttyS0
 ```
 
-`hwirq 3` 對應 dts 的 `interrupts-extended = <&plic 3 4>`。
+`hwirq 3` matches `interrupts-extended = <&plic 3 4>` in the dts.
 
-但 boot log 裡的 `irq = N` 只證明 DT 屬性被解析、PLIC domain 有對應到——**hwirq
-寫錯一樣會印出非零的 N**。決定性的是計數要隨打字上升，那需要真的走到線上：
+But `irq = N` in the boot log only proves the DT property was parsed and the PLIC
+domain mapped it — **a wrong hwirq prints a non-zero N too**. The decisive evidence is
+the count rising as you type, which needs the real wire:
 
 ```
-打字前 ttyS0 中斷計數: 165
-送入若干字元後:        452     （上升 287）
+ttyS0 interrupt count before typing: 165
+after sending some characters:       452     (up 287)
 ```
 
-這條路徑先前是關掉的。舊紀錄裡「第一次輸入就 silent reset」是在 **vendor
-OpenSBI** 底下觀察到的，而那顆 firmware 同時也是 62 秒 deadman、fid-33 ebreak halt
-與各種抓不到的 CSR reset 的來源。換成自編的 OpenSBI master 之後這條路從來沒重測過，
-這次一併驗了：打字全程沒有 reset。
+This path used to be disabled. The old note about "silent reset on the first
+keystroke" was recorded under the **vendor OpenSBI**, the same firmware behind the
+62-second deadman, the fid-33 ebreak halt and assorted uncatchable CSR resets. It was
+never retested after switching to a self-built OpenSBI master; this run covers it, and
+there was no reset at any point during typing.
 
-### R14 — 慢速態對照組
+### R14 — slow-state control run
 
 ```sh
 make boot-nopll
 ```
 
 ```
-  --no-pll：A27 mux 切回 HOSC（40 MHz）
+  --no-pll: A27 mux back on HOSC (40 MHz)
 ```
 
-只把 mux 切回 HOSC，PLL 不動，所以對照組跟正常組只差 mux 這一項。開機到 shell
-要 ~205 秒（正常是 ~12 秒），視窗開到 700 秒。只用來取對照數據，平常不要用。
+Only the mux moves back to HOSC; the PLL is left alone, so the control run differs
+from the normal one by exactly that one setting. It takes ~205 seconds to reach a
+shell (normally ~12), hence the 700-second window. Control data only; do not use it
+for normal boots.
 
 ---
 
-## 已知還沒有答案的
+## Known open items
 
-`SEL=0` 的絕對頻率沒有量到。欄位表標示是 HOSC，若真的是 40 MHz，相對 960 MHz
-應該慢 24 倍，但實測 kernel 慢 365 倍、原廠 boot0 的時間戳慢約 1270 倍。差一到
-兩個數量級。可能是那個狀態下的來源並非那顆 40 MHz DCXO（例如退到 RC1M），也
-可能慢的成因不只時脈。**沒有任何暫存器會報告 A27 實際跑幾 Hz**，所以這件事只能
-靠量測。它對其他結論沒有影響，留成 open item 而不是猜一個數字填上去。
+The absolute frequency at `SEL=0` has never been measured. The field table says HOSC,
+and if that really is 40 MHz it should be 24x slower than 960 MHz — but the kernel
+measures 365x slower, and the factory boot0 timestamps about 1270x slower. That is one
+to two orders of magnitude off. The source in that state may not be the 40 MHz DCXO at
+all (it could fall back to RC1M), or the slowness may not be purely clock related.
+**No register reports the rate the A27 is actually running at**, so this can only be
+settled by measurement. It affects none of the other conclusions, so it stays an open
+item rather than a guessed number.
 
-板子上沒有任何暫存器會報告 A27 實際跑幾 Hz，所以絕對頻率一律以 `0x4A010000` 的
-`N`/`D` 加 `0x4A010588` 的 mux 選擇推導（40 MHz × N ÷ D），不是量出來的。
+Because of that, absolute frequency is always derived rather than measured: `N`/`D`
+from `0x4A010000` plus the mux selection from `0x4A010588`, giving 40 MHz x N / D.

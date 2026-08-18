@@ -1,21 +1,23 @@
-# 授權
+# Licensing
 
-這個 repo 的內容衍生自幾個不同授權的上游專案，所以分開說明。
+The contents of this repo derive from several upstream projects under different
+licenses, so they are listed separately.
 
-| 檔案 | 授權 | 為什麼 |
+| File | License | Why |
 |---|---|---|
-| `patches/linux-*.patch` | GPL-2.0-only | 是 Linux kernel 的 diff |
-| `config/v821_rv32_defconfig`、`config/config-diff.txt` | GPL-2.0-only | kernel 組態 |
-| `patches/opensbi-01-v821-a27-port.patch` | BSD-2-Clause | 是 OpenSBI 的 diff，OpenSBI 本身是 BSD-2-Clause |
-| `boot/v821-min.dts` | GPL-2.0-only OR MIT | 沿用 kernel 內 device tree 的慣例 |
-| `boot/a27_stub.S`、`initramfs/init.sh` | GPL-2.0-only | 本專案自己寫的 |
-| `build.sh`、`scripts/*` 、`Makefile` | GPL-2.0-only | 本專案自己寫的 |
-| `initramfs/prebuilt/busybox` | GPL-2.0-only | BusyBox 1.33.2 的建置產物，原始碼見 https://busybox.net/ ，組態見 `config/busybox-rv32.config` |
+| `patches/linux-*.patch` | GPL-2.0-only | they are diffs against the Linux kernel |
+| `config/v821_rv32_defconfig`, `config/config-diff.txt` | GPL-2.0-only | kernel configuration |
+| `patches/opensbi-01-v821-a27-port.patch` | BSD-2-Clause | it is a diff against OpenSBI, which is BSD-2-Clause |
+| `boot/v821-min.dts` | GPL-2.0-only OR MIT | following the convention for device trees in the kernel |
+| `boot/a27_stub.S`, `initramfs/init.sh` | GPL-2.0-only | written for this project |
+| `build.sh`, `scripts/*`, `Makefile` | GPL-2.0-only | written for this project |
+| `initramfs/prebuilt/busybox` | GPL-2.0-only | a build of BusyBox 1.33.2; source at https://busybox.net/ , configuration in `config/busybox-rv32.config` |
 
-授權全文：
+Full license texts:
 - GPL-2.0-only — https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
 - BSD-2-Clause — https://opensource.org/license/bsd-2-clause
 
-`initramfs/prebuilt/busybox` 是 GPL 程式的 binary 形式，依 GPL-2.0 第 3 條需要提供對應的原始碼。
-對應版本是 BusyBox 1.33.2（上游 tarball），建置組態就是本 repo 的 `config/busybox-rv32.config`，
-建置指令寫在 `initramfs/prebuilt/README.md`。
+`initramfs/prebuilt/busybox` is the binary form of a GPL program, and GPL-2.0 section 3
+requires the corresponding source to be available. The version is BusyBox 1.33.2 (the
+upstream tarball), the build configuration is this repo's `config/busybox-rv32.config`,
+and the build command is in `initramfs/prebuilt/README.md`.
