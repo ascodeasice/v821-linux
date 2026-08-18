@@ -1,5 +1,5 @@
 #!/bin/sh
-# 重產 v821_rv32_defconfig 與 config-diff.txt。
+# 重產 config/v821_rv32_defconfig 與 config/config-diff.txt。
 #
 # 兩份都是 `make savedefconfig` 的輸出，也就是相對於 Kconfig 預設值的最小表述，
 # 所以 diff 出來就是我們真正做的決定。直接對 .config 跑 scripts/diffconfig 會得到
@@ -24,8 +24,8 @@ grep -v '^CONFIG_INITRAMFS_SOURCE=' "$KOUT/defconfig" > "$BUILD/defconfig.stripp
 	echo "# CONFIG_INITRAMFS_SOURCE 刻意不寫在這裡：它是絕對路徑，由 Makefile 在 build 時"
 	echo "# 用 scripts/config 注入 \$(BUILD)/initramfs.list。"
 	cat "$BUILD/defconfig.stripped"
-} > "$TOP/v821_rv32_defconfig"
-echo "   寫入 v821_rv32_defconfig（$(grep -c '' "$TOP/v821_rv32_defconfig") 行）"
+} > "$TOP/config/v821_rv32_defconfig"
+echo "   寫入 config/v821_rv32_defconfig（$(grep -c '' "$TOP/config/v821_rv32_defconfig") 行）"
 
 echo "== 產上游 rv32_defconfig 的 baseline =="
 rm -rf "$BUILD/kbase"
@@ -45,9 +45,9 @@ EOF
 	# --label 是為了不要把檔案路徑與 mtime 寫進去，否則每次重產都會有假的差異
 	diff -u --label a/rv32_defconfig --label b/v821_rv32_defconfig \
 	     "$BUILD/kbase/defconfig" "$BUILD/defconfig.stripped" || true
-} > "$TOP/config-diff.txt"
-echo "   寫入 config-diff.txt（$(grep -c '' "$TOP/config-diff.txt") 行）"
+} > "$TOP/config/config-diff.txt"
+echo "   寫入 config/config-diff.txt（$(grep -c '' "$TOP/config/config-diff.txt") 行）"
 
 echo
 echo "我們主動關掉的上層開關："
-grep '^+# CONFIG_' "$TOP/config-diff.txt" | sed 's/^+/  /'
+grep '^+# CONFIG_' "$TOP/config/config-diff.txt" | sed 's/^+/  /'

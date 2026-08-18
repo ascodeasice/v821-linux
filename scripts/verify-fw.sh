@@ -8,7 +8,7 @@
 # 用法：verify-fw.sh <path/to/fw_payload.bin>
 set -e
 
-TOP=$(cd "$(dirname "$0")" && pwd)
+TOP=$(cd "$(dirname "$0")/.." && pwd)
 FW=${1:-$TOP/build/fw_payload.bin}
 
 [ -s "$FW" ] || { echo "verify-fw: 找不到 $FW，先跑 make fw" >&2; exit 1; }

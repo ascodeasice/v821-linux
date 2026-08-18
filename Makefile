@@ -44,7 +44,7 @@ export KBUILD_BUILD_HOST      ?= v821-linux
 # 「編過幾次的樹」與「剛 clone 的樹」會得到不同的數字（init/Makefile:32）。
 export KBUILD_BUILD_VERSION   ?= 1
 
-DTS   := $(TOP)/v821-min.dts
+DTS   := $(TOP)/boot/v821-min.dts
 DTB   := $(BUILD)/v821-min.dtb
 IRFS  := $(BUILD)/initramfs.list
 IMAGE := $(KOUT)/arch/riscv/boot/Image
@@ -66,10 +66,10 @@ $(BUILD):
 # ---- 工具鏈與原始碼 ----
 
 tools:  ## 檢查 host 工具與 cross toolchain 真的能編 rv32
-	@sh $(TOP)/check-tools.sh $(CROSS)
+	@sh $(TOP)/scripts/check-tools.sh $(CROSS)
 
-$(STAMP): $(TOP)/pins.env $(wildcard $(TOP)/linux-*.patch) $(wildcard $(TOP)/opensbi-*.patch) | $(BUILD)
-	@BUILD=$(BUILD) sh $(TOP)/fetch.sh
+$(STAMP): $(TOP)/pins.env $(wildcard $(TOP)/patches/linux-*.patch) $(wildcard $(TOP)/patches/opensbi-*.patch) | $(BUILD)
+	@BUILD=$(BUILD) sh $(TOP)/scripts/fetch.sh
 	@touch $@
 
 src: $(STAMP)  ## 抓 linux 與 opensbi 到釘住的 commit 並套 patch
@@ -92,13 +92,13 @@ dtb: $(DTB)  ## 只重編 device tree
 # -march 要帶 _zicsr_zifencei，理由跟下面 OpenSBI 那條一樣：stub 裡有 csrw/csrs/
 # csrr 與 fence.i，binutils 2.36 之後這些不在 base I 裡面。加了之後兩套 toolchain
 # 編出來的位元組都跟 golden 相同，所以只是換一種寫法、不是換指令。
-$(BUILD)/a27_stub.elf: $(TOP)/a27_stub.S | $(BUILD)
+$(BUILD)/a27_stub.elf: $(TOP)/boot/a27_stub.S | $(BUILD)
 	$(CROSS)gcc -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -fno-pie -no-pie \
 	    -Wl,--build-id=none -Ttext=0x83f00000 -o $@ $<
 
 $(STUB): $(BUILD)/a27_stub.elf
 	$(CROSS)objcopy -O binary $< $@
-	@cmp $@ $(TOP)/a27_stub.bin.golden \
+	@cmp $@ $(TOP)/boot/a27_stub.bin.golden \
 	  && echo "  stub 與 golden 相同（134 bytes）" \
 	  || { echo "!! stub 與 a27_stub.bin.golden 不同。toolchain 換了 codegen，"; \
 	       echo "!! 上板前先用 $(CROSS)objdump -d $< 對照，確認沒有多出 PIE/note。"; exit 1; }
@@ -107,20 +107,20 @@ stub: $(STUB)  ## 編 A27 entry stub 並與 golden 比對
 
 # ---- initramfs ----
 
-$(IRFS): $(TOP)/initramfs.list.in $(TOP)/prebuilt/busybox $(TOP)/prebuilt/cycfreq $(TOP)/init.sh | $(BUILD)
+$(IRFS): $(TOP)/initramfs/initramfs.list.in $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/prebuilt/cycfreq $(TOP)/initramfs/init.sh | $(BUILD)
 	sed 's|@TOP@|$(TOP)|g' $< > $@
 
 # ---- kernel ----
 
 # CONFIG_INITRAMFS_SOURCE 是絕對路徑，所以不寫進 checked-in 的 defconfig，
 # 改成這裡注入。這樣 defconfig 本身跟機器無關。
-$(KOUT)/.config: $(TOP)/v821_rv32_defconfig $(IRFS) $(STAMP)
-	install -Dm644 $(TOP)/v821_rv32_defconfig $(LINUX)/arch/riscv/configs/v821_rv32_defconfig
+$(KOUT)/.config: $(TOP)/config/v821_rv32_defconfig $(IRFS) $(STAMP)
+	install -Dm644 $(TOP)/config/v821_rv32_defconfig $(LINUX)/arch/riscv/configs/v821_rv32_defconfig
 	$(KMAKE) v821_rv32_defconfig
 	$(LINUX)/scripts/config --file $@ --set-str INITRAMFS_SOURCE $(IRFS)
 	$(KMAKE) olddefconfig
 
-kernel: $(KOUT)/.config $(IRFS) $(TOP)/prebuilt/busybox $(TOP)/prebuilt/cycfreq $(TOP)/init.sh  ## 編 kernel Image（initramfs 內建）
+kernel: $(KOUT)/.config $(IRFS) $(TOP)/initramfs/prebuilt/busybox $(TOP)/initramfs/prebuilt/cycfreq $(TOP)/initramfs/init.sh  ## 編 kernel Image（initramfs 內建）
 	$(KMAKE) -j$(NPROC) Image
 
 $(IMAGE): kernel
@@ -148,31 +148,31 @@ fw: $(DTB) kernel $(STAMP)  ## 把 kernel 與 dtb 包進 OpenSBI fw_payload
 # ---- 上板前的關卡 ----
 
 verify: fw  ## 把內嵌的 FDT 從 fw_payload 挖出來看
-	@sh $(TOP)/verify-fw.sh $(FW)
+	@sh $(TOP)/scripts/verify-fw.sh $(FW)
 
 check: verify $(STUB)  ## verify + 靜態掃描（最後一道 host 端關卡）
-	@sh $(TOP)/check-image.sh $(CROSS) $(KOUT) $(BUILD) $(FW)
+	@sh $(TOP)/scripts/check-image.sh $(CROSS) $(KOUT) $(BUILD) $(FW)
 
 # ---- 上板 ----
 
 boot: check  ## 進 FEL 開機（按 FEL 鈕重插 USB 之後再跑）
-	python3 $(TOP)/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux.log --secs=120
+	python3 $(TOP)/scripts/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux.log --secs=120
 
 # 重現「A27 直接掛在 HOSC 40 MHz」的慢速態。只用來取對照數據，平常不要用。
 boot-nopll: check  ## 慢速態對照組（A27 掛 HOSC，開機要 ~205 秒）
-	python3 $(TOP)/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux-nopll.log \
+	python3 $(TOP)/scripts/felcpux.py --fw=$(FW) --stub=$(STUB) --log=$(BUILD)/felcpux-nopll.log \
 	    --no-pll --secs=700
 
 # ---- 重現用 ----
 
 config-diff: $(KOUT)/.config  ## 重產 v821_rv32_defconfig 與 config-diff.txt
-	@sh $(TOP)/config-diff.sh $(LINUX) $(KOUT) $(BUILD) $(CROSS) $(TOP)
+	@sh $(TOP)/scripts/config-diff.sh $(LINUX) $(KOUT) $(BUILD) $(CROSS) $(TOP)
 
 patch-check: $(STAMP)  ## 確認 patch 仍然對得上釘住的 commit
-	@for p in $(TOP)/linux-*.patch; do \
+	@for p in $(TOP)/patches/linux-*.patch; do \
 	    git -C $(LINUX) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
-	@for p in $(TOP)/opensbi-*.patch; do \
+	@for p in $(TOP)/patches/opensbi-*.patch; do \
 	    git -C $(OPENSBI) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
 

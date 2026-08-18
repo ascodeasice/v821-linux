@@ -9,7 +9,7 @@
 set -e
 
 CROSS=$1; KOUT=$2; BUILD=$3; FW=$4
-TOP=$(cd "$(dirname "$0")" && pwd)
+TOP=$(cd "$(dirname "$0")/.." && pwd)
 fail=0
 say() { printf '%-46s %s\n' "$1" "$2"; }
 
@@ -44,7 +44,7 @@ fi
 
 # 3. stub 與 golden 相同。這一項同時抓到 PIE、build-id note 與 codegen 漂移
 if [ -f "$BUILD/a27_stub.bin" ]; then
-	if cmp -s "$BUILD/a27_stub.bin" "$TOP/a27_stub.bin.golden"; then
+	if cmp -s "$BUILD/a27_stub.bin" "$TOP/boot/a27_stub.bin.golden"; then
 		say "a27_stub 與 golden 相同" "ok（$(stat -c%s "$BUILD/a27_stub.bin") bytes）"
 	else
 		say "a27_stub 與 golden 相同" "不同 — 上板前先 objdump -d 對照"
@@ -56,10 +56,10 @@ fi
 
 # 4. prebuilt 的 ABI 要跟 dts 宣告的一致。hard-float 的 binary 會在 __sigsetjmp 的 fsd 上 SIGILL
 for b in busybox cycfreq; do
-	d=$(file -b "$TOP/prebuilt/$b" 2>/dev/null || echo missing)
+	d=$(file -b "$TOP/initramfs/prebuilt/$b" 2>/dev/null || echo missing)
 	case "$d" in
-	    *"ELF 32-bit"*"RISC-V"*"soft-float"*static*) say "prebuilt/$b 是 rv32 soft-float static" "ok" ;;
-	    *) say "prebuilt/$b 是 rv32 soft-float static" "不對：$d"; fail=1 ;;
+	    *"ELF 32-bit"*"RISC-V"*"soft-float"*static*) say "initramfs/prebuilt/$b 是 rv32 soft-float static" "ok" ;;
+	    *) say "initramfs/prebuilt/$b 是 rv32 soft-float static" "不對：$d"; fail=1 ;;
 	esac
 done
 

@@ -101,7 +101,7 @@ make config-diff
 cat config-diff.txt
 ```
 
-`v821_rv32_defconfig` 是 112 行，對應的 `.config` 是 1991 行。`config-diff.txt` 是
+`config/v821_rv32_defconfig` 是 112 行，對應的 `.config` 是 1991 行。`config/config-diff.txt` 是
 兩份 `savedefconfig` 輸出的 diff，也就是相對於 Kconfig 預設值的最小表述，所以看到
 的就是真正做過的決定：21 個主動關掉的開關、23 項設定。
 
@@ -204,9 +204,9 @@ ttyS0 at MMIO 0x42500000 (irq = 12, base_baud = 12000000) is a 16550A
 ```
 
 `A3478` 是 `head.S` 的 marker（進 S-mode / 清 sie+sip / 寫完 scounteren /
-setup_vm 之前 / 開 MMU 之前），來自 `linux-02-early-uart-markers.patch`。
+setup_vm 之前 / 開 MMU 之前），來自 `patches/linux-02-early-uart-markers.patch`。
 banner 裡的 `ga0c83177734a` 證明跑的就是釘住的那顆 commit。
-（沒有 `-rc4-00315-` 這種 commit 數，是因為 `fetch.sh` 用淺層 fetch 抓單一 commit，
+（沒有 `-rc4-00315-` 這種 commit 數，是因為 `scripts/fetch.sh` 用淺層 fetch 抓單一 commit，
 樹裡沒有 tag，`scripts/setlocalversion` 的 `git describe` 就退回只印 `-g<sha>`。
 `-dirty` 是因為 patch 是以工作區改動的形式套上去的，沒有 commit。）
 

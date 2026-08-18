@@ -4,7 +4,7 @@
 # 已經抓好而且 HEAD 對得上 pin 的話，這支什麼都不做，可以重複執行。
 set -e
 
-TOP=$(cd "$(dirname "$0")" && pwd)
+TOP=$(cd "$(dirname "$0")/.." && pwd)
 BUILD=${BUILD:-$TOP/build}
 . "$TOP/pins.env"
 
@@ -59,10 +59,10 @@ apply_patches() {
 }
 
 fetch_at "$BUILD/linux"   "$LINUX_URL"   "$LINUX_SHA"   linux
-apply_patches "$BUILD/linux" "$TOP/linux-*.patch" linux
+apply_patches "$BUILD/linux" "$TOP/patches/linux-*.patch" linux
 
 fetch_at "$BUILD/opensbi" "$OPENSBI_URL" "$OPENSBI_SHA" opensbi
-apply_patches "$BUILD/opensbi" "$TOP/opensbi-*.patch" opensbi
+apply_patches "$BUILD/opensbi" "$TOP/patches/opensbi-*.patch" opensbi
 
 echo
 echo "原始碼就緒。接下來：make"

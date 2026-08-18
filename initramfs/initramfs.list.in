@@ -12,6 +12,6 @@ nod  /dev/console 0600 0 0 c 5 1
 dir  /proc 0755 0 0
 dir  /sys 0755 0 0
 dir  /bin 0755 0 0
-file /bin/busybox @TOP@/prebuilt/busybox 0755 0 0
-file /bin/cycfreq @TOP@/prebuilt/cycfreq 0755 0 0
-file /init      @TOP@/init.sh          0755 0 0
+file /bin/busybox @TOP@/initramfs/prebuilt/busybox 0755 0 0
+file /bin/cycfreq @TOP@/initramfs/prebuilt/cycfreq 0755 0 0
+file /init      @TOP@/initramfs/init.sh          0755 0 0

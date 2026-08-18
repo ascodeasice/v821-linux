@@ -93,7 +93,7 @@ printf '#include <stdio.h>\nint main(void){puts("hi");return 0;}\n' > "$TMP/u.c"
 if $CC -march=rv32imac -mabi=ilp32 -static -o "$TMP/u" "$TMP/u.c" 2>/dev/null; then
 	say "rv32 static userspace" "可以編（可以自己重編 busybox）"
 else
-	say "rv32 static userspace" "編不了（正常，改用 prebuilt/，見 prebuilt/README.md）"
+	say "rv32 static userspace" "編不了（正常，改用 prebuilt/，見 initramfs/prebuilt/README.md）"
 fi
 
 echo

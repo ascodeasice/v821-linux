@@ -14,30 +14,41 @@ A27 的喚醒序列，就是這個移植的全部。
 
 ## 這個 repo 有什麼
 
-四個要拿給人審查的東西都在頂層：
+```
+.
+├── Makefile          建置 DAG：dts → dtb → kernel → fw_payload → verify → check → boot
+├── build.sh          一鍵：檢查工具 → 抓原始碼 → 編 → 跑上板前的靜態關卡
+├── pins.env          釘住的上游 commit
+├── boot/             會進到板子上的東西：device tree 與 A27 entry stub
+├── config/           kernel 與 busybox 的 config，以及與上游的 diff
+├── initramfs/        initramfs 的內容，含 prebuilt/ 的 rv32 binary
+├── patches/          kernel 與 OpenSBI 的全部改動
+├── scripts/          抓原始碼、上板前的檢查、FEL 喚醒
+└── RESULTS.md        每個宣稱對應一條可以跑的指令與預期證據行
+```
+
+四個要拿給人審查的東西：
 
 | 檔案 | 是什麼 |
 |---|---|
-| `v821-min.dts` | 最小 device tree，77 行實體 + 逐項寫明為什麼留下的註解 |
-| `config-diff.txt` | 與上游 `rv32_defconfig` 的差異，363 行，兩邊都是 `savedefconfig` 輸出 |
-| `felcpux.py` | **A27 的喚醒序列**。這是整個移植最關鍵的一段——見下面「A27 為什麼要 host 端喚醒」 |
-| `linux-01/02-*.patch`、`opensbi-01-*.patch` | kernel 與 OpenSBI 的全部改動 |
+| `boot/v821-min.dts` | 最小 device tree，77 行實體 + 逐項寫明為什麼留下的註解 |
+| `config/config-diff.txt` | 與上游 `rv32_defconfig` 的差異，363 行，兩邊都是 `savedefconfig` 輸出 |
+| `scripts/felcpux.py` | **A27 的喚醒序列**。這是整個移植最關鍵的一段——見下面「A27 為什麼要 host 端喚醒」 |
+| `patches/linux-01/02-*.patch`、`patches/opensbi-01-*.patch` | kernel 與 OpenSBI 的全部改動 |
 
 其餘：
 
 | 檔案 | 用途 |
 |---|---|
-| `Makefile` | 建置 DAG：dts → dtb → kernel → fw_payload → verify → check → boot |
-| `pins.env` | 釘住的上游 commit |
-| `fetch.sh` | 抓 linux 與 opensbi 到釘住的 commit 並套 patch |
-| `build.sh` | 一鍵：檢查工具 → 抓原始碼 → 編 → 跑上板前的靜態關卡 |
-| `check-tools.sh` | 驗 toolchain 真的編得出 rv32，不是只看 gcc 在不在 |
-| `check-image.sh` | 上板前的靜態關卡，見 `RESULTS.md` 的 R3/R4 |
-| `verify-fw.sh` | 把內嵌的 FDT 從 `fw_payload.bin` 挖回來驗 |
-| `a27_stub.S` + `.bin.golden` | A27 出 reset 後的落地點，134 bytes |
-| `init.sh`、`cycfreq.c`、`busybox-rv32.config` | initramfs 的內容 |
-| `prebuilt/` | rv32 的 busybox 與 cycfreq，為什麼要 prebuilt 見 `prebuilt/README.md` |
-| `RESULTS.md` | 每個宣稱對應一條可以跑的指令與預期證據行 |
+| `scripts/fetch.sh` | 抓 linux 與 opensbi 到釘住的 commit 並套 patch |
+| `scripts/check-tools.sh` | 驗 toolchain 真的編得出 rv32，不是只看 gcc 在不在 |
+| `scripts/check-image.sh` | 上板前的靜態關卡，見 `RESULTS.md` 的 R3/R4 |
+| `scripts/verify-fw.sh` | 把內嵌的 FDT 從 `fw_payload.bin` 挖回來驗 |
+| `scripts/config-diff.sh` | 從目前的 `.config` 重產 `config/` 底下那兩份 |
+| `boot/a27_stub.S` + `boot/a27_stub.bin.golden` | A27 出 reset 後的落地點，134 bytes |
+| `config/v821_rv32_defconfig`、`config/busybox-rv32.config` | kernel 與 busybox 的 config |
+| `initramfs/init.sh`、`initramfs/initramfs.list.in`、`initramfs/cycfreq.c` | initramfs 的內容 |
+| `initramfs/prebuilt/` | rv32 的 busybox 與 cycfreq，為什麼要 prebuilt 見 `initramfs/prebuilt/README.md` |
 
 ---
 
@@ -84,7 +95,7 @@ freestanding link、跑一次 OpenSBI 自己那個 LD_PIE 探測。
 
 **toolchain 的一個限制**：發行版的 `riscv64-linux-gnu-*` 沒有 rv32 的 libc，
 所以 userspace 編不出來。kernel、OpenSBI、stub 都是 freestanding，不受影響。
-busybox 與 cycfreq 因此用 prebuilt，理由與重編方式見 `prebuilt/README.md`。
+busybox 與 cycfreq 因此用 prebuilt，理由與重編方式見 `initramfs/prebuilt/README.md`。
 
 要用 XuanTie 那套（原本實機驗過的）就 `make CROSS=/abs/path/to/riscv64-unknown-linux-gnu-`。
 
@@ -178,7 +189,7 @@ log 同時寫到 `build/felcpux.log`。已驗證的一份存在 `boot-reference.
 
 ### 1. 最小 device tree
 
-完整檔案是 `v821-min.dts`（162 行，其中 85 行是說明為什麼的註解）。節點只有這些：
+完整檔案是 `boot/v821-min.dts`（162 行，其中 85 行是說明為什麼的註解）。節點只有這些：
 
 ```
 / (allwinner,v821 / allwinner,sun300iw1p1)
@@ -215,7 +226,7 @@ cpu-intc 與 PLIC，console 要 UART0。其餘一律砍掉，2472 行變 77 行�
 
 ### 2. kernel config
 
-`v821_rv32_defconfig` 是 112 行，展開成 `.config` 是 1991 行。差異看 `config-diff.txt`，
+`config/v821_rv32_defconfig` 是 112 行，展開成 `.config` 是 1991 行。差異看 `config/config-diff.txt`，
 它是兩份 `savedefconfig` 輸出的 diff，所以看到的就是真正做過的決定：21 個主動關掉的
 開關、23 項設定。
 
@@ -237,7 +248,7 @@ RISCV_ISA_VENDOR_EXT_ANDES / MIPS / SIFIVE / THEAD
 
 ### 3. A27 為什麼要 host 端喚醒
 
-這是整個移植花最久的一關，也是 `felcpux.py` 存在的理由。
+這是整個移植花最久的一關，也是 `scripts/felcpux.py` 存在的理由。
 
 V821 有兩顆 RISC-V 核：**T-Head E907** 是 boot MCU，**物理上沒有 Supervisor mode**；
 **Andes A27L2** 才是跑 Linux 的應用核。而 `xfel exec` 執行的是 **E907**。
@@ -250,7 +261,7 @@ E907 沒有 S-mode 可以 force。
 fault，E907 在 FEL/FES 狀態下的 CPU bus 到不了 CPUX_CFG block。決定性的探測是
 `xfel read32 0x49100204` 讀得到而且不 fault：**BROM/FEL 的存取路徑到得了，只差先解 reset**。
 
-於是喚醒序列跑在 host 上，透過 xfel 一格一格寫進去（`felcpux.py`）：
+於是喚醒序列跑在 host 上，透過 xfel 一格一格寫進去（`scripts/felcpux.py`）：
 
 ```python
 wr32(APP_RESET, rd32(APP_RESET) & ~0x1C000000)   # 先把 A27 押回 reset
@@ -278,7 +289,7 @@ rmw(APP_RESET, 0x04000000)                        # cpu reset deassert，A27 開
   等於 `40*40/1 = 1600 MHz`，也就是一直在超頻。現在先讀 `PLL_FUNC_CFG` 的 `DCXO_ST`
   判斷 HOSC 再選。
 
-A27 出 reset 後落在 `a27_stub.S`（134 bytes）：設 `mcache_ctl`(0x7ca)、`mmisc_ctl`(0x7d0)、
+A27 出 reset 後落在 `boot/a27_stub.S`（134 bytes）：設 `mcache_ctl`(0x7ca)、`mmisc_ctl`(0x7d0)、
 `fence.i`，然後 `a0=mhartid, a1=0` 跳到 `0x80000000`。它**刻意不碰 `0x7c0`**——那是 E907
 的 T-Head `mxstatus`，在 Andes A27 上是別的東西而且會 fault。
 
@@ -286,11 +297,11 @@ A27 出 reset 後落在 `a27_stub.S`（134 bytes）：設 `mcache_ctl`(0x7ca)、
 
 kernel 2 個檔、27 行：
 
-- `linux-01-alternative-workaround.patch` — `apply_boot_alternatives()` 直接 return。
+- `patches/linux-01-alternative-workaround.patch` — `apply_boot_alternatives()` 直接 return。
   RV32 的 alternative pass 會解出錯的 `old_ptr`，在 `__patch_insn_write()` 吃到 load
   page fault。我們跑最小 rv32imac config，沒有任何 errata / Z-ext alternative，未 patch
   的預設路徑就是正確的 baseline。**還沒 root-cause，所以還不能上游。**
-- `linux-02-early-uart-markers.patch` — `head.S` 的早期 UART marker。MMU 還沒開就沒有
+- `patches/linux-02-early-uart-markers.patch` — `head.S` 的早期 UART marker。MMU 還沒開就沒有
   console，這是除錯用的，不是移植的必要條件。
 
 OpenSBI 是 upstream master `547a5bb` 加一支 patch（7 個檔），做的事：
@@ -313,12 +324,12 @@ commit。反向比正向嚴格：它同時證明改動確實在樹上、而且�
 
 | 想改什麼 | 動哪裡 | 之後跑什麼 |
 |---|---|---|
-| device tree | `v821-min.dts` | `make verify` |
-| kernel config | `make menuconfig` | `make config-diff` 把 `v821_rv32_defconfig` 與 `config-diff.txt` 更新回來 |
-| initramfs 內容 | `initramfs.list.in`、`init.sh` | `make kernel` |
+| device tree | `boot/v821-min.dts` | `make verify` |
+| kernel config | `make menuconfig` | `make config-diff` 把 `config/v821_rv32_defconfig` 與 `config/config-diff.txt` 更新回來 |
+| initramfs 內容 | `initramfs/initramfs.list.in`、`initramfs/init.sh` | `make kernel` |
 | 換 toolchain | `make CROSS=...` | `make tools` 再 `make check` |
 | 換 kernel / OpenSBI 版本 | `pins.env` | `make src`；patch 大概要重做 |
-| bootargs | `v821-min.dts` 的 `/chosen` | `make verify` 確認真的包進去了 |
+| bootargs | `boot/v821-min.dts` 的 `/chosen` | `make verify` 確認真的包進去了 |
 
 改完一律 `make check` 再上板。
 
@@ -330,7 +341,7 @@ commit。反向比正向嚴格：它同時證明改動確實在樹上、而且�
 |---|---|
 | `xfel version` 看不到 V821 | 沒進 FEL（按住鈕再插），或缺 udev rule |
 | 完全沒有任何字元，連 `#` 都沒有 | stub 壞了。先 `make check` 看 golden `cmp` 過不過 |
-| 只有 `#YWV` 然後靜音 | OpenSBI 在早期掛了。多半是 M-mode CSR，看 `opensbi-01` 那支 patch |
+| 只有 `#YWV` 然後靜音 | OpenSBI 在早期掛了。多半是 M-mode CSR，看 `patches/opensbi-01` 那支 patch |
 | 開頭正常但後面全是亂碼 | UART 的 `clock-frequency` 不對，應該是 192 MHz |
 | 停在 `[0.000000]` 不動 | PLMT 節點掉了，kernel 拿不到 timer tick |
 | 開機超級慢（~205 秒） | A27 掛在 HOSC 沒切到 CPU_PLL，看 `==> A27 CPU clock` 那行 |
@@ -350,7 +361,7 @@ Tina Linux 5.4.220。
 - **各種死路的紀錄**（TLB/icache 的 bisection patch、OpenSBI v1.4 的 patch、FEL 早期的
   trampoline）。留在舊 repo 的 `mainline/patches/`。
 - **UART / PLIC / PLMT 以外的任何 driver**。沒有 CCU、沒有 pinctrl、沒有 mmc。所以
-  `clk_summary` 是空的，CPU 時脈只能靠 `felcpux.py` 印的暫存器值確認。
+  `clk_summary` 是空的，CPU 時脈只能靠 `scripts/felcpux.py` 印的暫存器值確認。
 - **vendor 的 Tina SDK**（18 GB）與 NOR 備份（32 MB）。備份重建方式：
   `xfel spinor read 0 0x2000000 nor_full_backup.bin`。
 

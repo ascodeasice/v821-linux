@@ -31,7 +31,7 @@ ELF 32-bit LSB executable, UCB RISC-V, RVC, soft-float ABI, statically linked
 Tag_RISCV_arch: rv32i2p0_m2p0_a2p0_c2p0
 ```
 
-ABI 必須跟 `v821-min.dts` 宣告的 `riscv,isa-extensions = "i","m","a","c"` 一致。
+ABI 必須跟 `boot/v821-min.dts` 宣告的 `riscv,isa-extensions = "i","m","a","c"` 一致。
 換成 hard-float（ilp32d）的版本會在 glibc `__sigsetjmp` 的 `fsd` 指令上 SIGILL——
 dts 沒有宣告 F/D，kernel 就不開 FPU，第一條浮點指令直接 illegal instruction。
 
@@ -42,7 +42,7 @@ dts 沒有宣告 F/D，kernel 就不開 FPU，第一條浮點指令直接 illega
 **XuanTie（原本用的，實機驗過的就是這顆編的）**
 
 ```sh
-# busybox 1.33.2，config 用 repo 根目錄的 busybox-rv32.config
+# busybox 1.33.2，config 用 config/busybox-rv32.config
 make CROSS_COMPILE=<xuantie>/bin/riscv64-unknown-linux-gnu- -j$(nproc)
 
 # cycfreq
@@ -62,9 +62,9 @@ busybox 1.33.2 是 2021 年的東西，沒有 pin `-std`，用 gcc 15 編會撞�
 
 ## cycfreq 的隱藏耦合
 
-`cycfreq.c:37` 有一行 `#define TIMEBASE_HZ 40000000ULL`，跟 `v821-min.dts` 的
+`cycfreq.c:37` 有一行 `#define TIMEBASE_HZ 40000000ULL`，跟 `boot/v821-min.dts` 的
 `timebase-frequency` 是同一個數字的兩份拷貝。改 dts 而沒重編 cycfreq，它印出來的
 Hz 就會是錯的，而且不會有任何警告。因為它是 prebuilt，這個耦合只能靠這段文字提醒。
 
-`cycfreq` 只是量測工具，最小開機不需要它。要拿掉就把 `initramfs.list.in` 裡那行
-刪掉，同時刪掉 `init.sh` 呼叫 `/bin/cycfreq` 的那行。
+`cycfreq` 只是量測工具，最小開機不需要它。要拿掉就把 `initramfs/initramfs.list.in`
+裡那行刪掉，同時刪掉 `initramfs/init.sh` 呼叫 `/bin/cycfreq` 的那行。
