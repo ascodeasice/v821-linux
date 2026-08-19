@@ -179,11 +179,14 @@ boot-nopll: check  ## slow-state control run (A27 on HOSC, ~205 s to shell)
 config-diff: $(KOUT)/.config  ## regenerate config/v821_rv32_defconfig and config/config-diff.txt
 	@sh $(TOP)/scripts/config-diff.sh $(LINUX) $(KOUT) $(BUILD) $(CROSS) $(TOP)
 
+# use -e to prevent error when there is no -*.patch file
 patch-check: $(STAMP)  ## confirm the patches still line up with the pinned commits
 	@for p in $(TOP)/patches/linux-*.patch; do \
+	    [ -e "$$p" ] || continue; \
 	    git -C $(LINUX) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
 	@for p in $(TOP)/patches/opensbi-*.patch; do \
+	    [ -e "$$p" ] || continue; \
 	    git -C $(OPENSBI) apply --check -R $$p && echo "  ok  $$(basename $$p)" \
 	      || { echo "  FAIL $$(basename $$p)"; exit 1; }; done
 

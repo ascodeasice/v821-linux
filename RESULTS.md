@@ -123,8 +123,6 @@ make patch-check
 ```
 
 ```
-  ok  linux-01-alternative-workaround.patch
-  ok  linux-02-early-uart-markers.patch
   ok  opensbi-01-v821-a27-port.patch
 ```
 
@@ -202,22 +200,19 @@ core, because before the cfg reset is deasserted that write is ignored.
 ### R10 — the kernel reaches S-mode and gets a console
 
 ```
-A3478
 OpenSBI v1.8
 Boot HART Base ISA          : rv32imafdcnx
-Linux version 7.0.0-rc4-ga0c83177734a-dirty
+Linux version 7.0.0-rc4-ga0c83177734a
 ttyS0 at MMIO 0x42500000 (irq = 12, base_baud = 12000000) is a 16550A
 ```
 
-`A3478` is the marker from `head.S` (entered S-mode / cleared sie+sip / wrote
-scounteren / before setup_vm / before enabling the MMU), added by
-`patches/linux-02-early-uart-markers.patch`. The `ga0c83177734a` in the banner proves
-the running kernel is the pinned commit.
+The `ga0c83177734a` in the banner proves the running kernel is the pinned commit.
 
 (There is no `-rc4-00315-` commit count because `scripts/fetch.sh` shallow-fetches a
 single commit, so the tree has no tags and `scripts/setlocalversion`'s `git describe`
-falls back to printing only `-g<sha>`. The `-dirty` is because the patches are applied
-as working-tree changes rather than committed.)
+falls back to printing only `-g<sha>`. There is no `-dirty` either: the kernel tree
+carries no patches now, and `setlocalversion` ignores the untracked defconfig that the
+build installs into `arch/riscv/configs/`.)
 
 ### R11 — the timer frequency is right
 

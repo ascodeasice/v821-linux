@@ -28,7 +28,7 @@ decision, is here: <https://hackmd.io/_WsFDR1QTGmC79huqfH6xA?view>
 ├── boot/             what ends up on the board: device tree and A27 entry stub
 ├── config/           kernel and busybox config, plus the diff against upstream
 ├── initramfs/        initramfs contents, including the rv32 busybox in prebuilt/
-├── patches/          every change to the kernel and OpenSBI
+├── patches/          the OpenSBI changes (the kernel needs none)
 ├── scripts/          fetching sources, the pre-flight checks, the FEL wake-up
 └── RESULTS.md        every claim, with the command that reproduces it
 ```
@@ -40,7 +40,7 @@ The four things worth reviewing:
 | `boot/v821-min.dts` | the minimal device tree: 77 substantive lines, plus a comment on each node saying why it survived |
 | `config/config-diff.txt` | what differs from the upstream `rv32_defconfig`, 361 lines, both sides `savedefconfig` output |
 | `scripts/felcpux.py` | **the A27 wake-up sequence** — the crux of the whole port, see "Why the A27 needs a host-side wake-up" below |
-| `patches/linux-01/02-*.patch`, `patches/opensbi-01-*.patch` | every change to the kernel and OpenSBI |
+| `patches/opensbi-01-*.patch` | every change to OpenSBI; the kernel is unmodified upstream |
 
 The rest:
 
@@ -189,7 +189,7 @@ is in. The full list and what each one means is in `RESULTS.md`; in summary:
 | 2 | `START_ADD readback: 0x83f00000` | the write stuck (it is ignored before the cfg reset is deasserted) |
 | 3 | `#YWV` | the A27 is out of reset and running our stub |
 | 4 | `OpenSBI v1.8` banner | the M-mode firmware is up |
-| 5 | `A3478`, `Linux version 7.0.0-rc4-ga0c83177734a-dirty` | the kernel reached S-mode |
+| 5 | `Booting Linux on hartid 0`, `Linux version 7.0.0-rc4-ga0c83177734a` | the kernel reached S-mode |
 | 6 | `ttyS0 at MMIO 0x42500000` | the console is up |
 | 7 | `/ #`, `>>> SHELL on A27!` | booted to a shell |
 
@@ -330,18 +330,18 @@ and `mmisc_ctl`(0x7d0), `fence.i`, then jump to `0x80000000` with `a0=mhartid, a
 It **deliberately does not touch `0x7c0`** — that is the E907's T-Head `mxstatus`,
 which on the Andes A27 is something else entirely and faults.
 
-### 4. The kernel and OpenSBI changes
+### 4. The OpenSBI changes
 
-The kernel side is 2 files, 25 added lines:
+**The kernel is unmodified upstream.** Two workarounds were carried through bring-up
+and both were dropped once they were tested on the final stack:
 
-- `patches/linux-01-alternative-workaround.patch` — `apply_boot_alternatives()`
-  returns immediately. The RV32 alternative pass resolves a wrong `old_ptr` and takes
-  a load page fault in `__patch_insn_write()`. We run a minimal rv32imac config with
-  no errata and no Z-ext alternatives, so the unpatched default path is the correct
-  baseline. **Not root-caused yet, so not upstreamable.**
-- `patches/linux-02-early-uart-markers.patch` — early UART markers in `head.S`. There
-  is no console before the MMU is on; this is a debugging aid, not a requirement of
-  the port.
+- `apply_boot_alternatives()` early return, added when the RV32 alternative pass took
+  a load page fault in `__patch_insn_write()`. That fault does not reproduce here: with
+  the pass left alone the board boots to a shell (R10), and mainline's Andes errata only
+  match AX45MP, so on an A27 with this minimal config the pass has nothing to patch.
+- early UART markers in `head.S`. A debugging aid for the stretch before the MMU is on,
+  not a requirement of the port. Worth re-adding by hand if the board ever goes silent
+  between OpenSBI and `Booting Linux` again.
 
 OpenSBI is upstream master `547a5bb` plus one patch touching 7 files, which:
 
